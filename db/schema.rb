@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
+ActiveRecord::Schema[7.1].define(version: 2026_05_18_133933) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -21,6 +21,7 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   # Custom types defined in this database.
   # Note that some types may not work with other database engines. Be careful if changing database.
   create_enum "contact_type_enum", ["person", "company", "group"]
+  create_enum "journey_sessions_status_enum", ["active", "completed", "failed", "cancelled", "paused", "waiting"]
 
   create_table "access_tokens", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "name", limit: 255, null: false
@@ -186,6 +187,105 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
     t.jsonb "flow_data"
     t.index ["flow_data"], name: "index_automation_rules_on_flow_data", using: :gin
     t.index ["mode"], name: "index_automation_rules_on_mode"
+  end
+
+  create_table "campaign_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "campaign_id", null: false
+    t.string "workflow_id", limit: 255, null: false
+    t.string "run_id", limit: 255, null: false
+    t.string "status", limit: 20, default: "running", null: false
+    t.integer "total_contacts", default: 0, null: false
+    t.integer "processed_contacts", default: 0, null: false
+    t.integer "sent_contacts", default: 0, null: false
+    t.integer "failed_contacts", default: 0, null: false
+    t.integer "current_batch", default: 0, null: false
+    t.integer "total_batches", default: 0, null: false
+    t.timestamptz "started_at", default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.timestamptz "ended_at"
+    t.text "last_error"
+    t.jsonb "metadata", default: {}, null: false
+    t.timestamptz "created_at", default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.timestamptz "updated_at", default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["campaign_id", "status"], name: "idx_campaign_executions_campaign_status"
+    t.index ["campaign_id"], name: "idx_campaign_executions_campaign_id"
+    t.index ["campaign_id"], name: "uq_campaign_executions_active_per_campaign", unique: true, where: "((status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[]))"
+    t.index ["workflow_id"], name: "idx_campaign_executions_workflow_id"
+  end
+
+  create_table "campaigns", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "title", limit: 255, null: false
+    t.string "name", limit: 40, null: false
+    t.text "description"
+    t.string "publisher", limit: 100
+    t.timestamptz "schedule_to"
+    t.string "scheduled_job_id", limit: 255
+    t.integer "status", default: 0, null: false
+    t.integer "spread_sending"
+    t.decimal "sent_contacts"
+    t.decimal "sent_percentage"
+    t.text "query"
+    t.jsonb "steps"
+    t.jsonb "tags"
+    t.boolean "send_to_all", default: false, null: false
+    t.string "type", limit: 30, null: false
+    t.uuid "inbox_id"
+    t.string "channel_type", limit: 50
+    t.boolean "is_rate_limit", default: false, null: false
+    t.boolean "is_run_segment", default: false, null: false
+    t.integer "recurrence_count", default: 0, null: false
+    t.jsonb "recurrence_settings"
+    t.string "testab_name", limit: 255
+    t.string "testab_subject", limit: 255
+    t.decimal "testab_percentage"
+    t.string "testab_winner_criteria", limit: 50
+    t.integer "testab_duration_hours"
+    t.string "phone_number_strategy", limit: 50, default: "round_robin", null: false
+    t.jsonb "template_allocation_config", default: {}, null: false
+    t.jsonb "delivery_distribution", default: {}, null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "deleted_at", precision: nil
+    t.jsonb "trigger_config"
+    t.index ["channel_type"], name: "idx_campaigns_channel_type"
+    t.index ["inbox_id"], name: "idx_campaigns_inbox_id"
+    t.index ["name"], name: "unique_campaign_name", unique: true
+    t.index ["schedule_to"], name: "idx_campaigns_schedule_to", where: "(status = 1)"
+    t.index ["status"], name: "idx_campaigns_status"
+  end
+
+  create_table "campaigns_configs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "name", limit: 255, null: false
+    t.text "description"
+    t.jsonb "configs", default: {}, null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["configs"], name: "idx_campaign_configs_configs", using: :gin
+  end
+
+  create_table "campaigns_contacts", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "campaign_id", null: false
+    t.uuid "contact_id", null: false
+    t.datetime "sent_at", precision: nil
+    t.string "status", limit: 50
+    t.integer "batch_sequence"
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["campaign_id", "batch_sequence"], name: "idx_campaign_contacts_batch_sequence", where: "(batch_sequence IS NOT NULL)"
+    t.index ["campaign_id", "created_at", "id"], name: "idx_campaign_contacts_cursor"
+    t.index ["campaign_id"], name: "idx_campaign_contacts_campaign_id"
+    t.index ["contact_id"], name: "idx_campaign_contacts_contact_id"
+  end
+
+  create_table "campaigns_templates", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "campaign_id", null: false
+    t.uuid "message_template_id", null: false
+    t.string "variant", limit: 10, default: "A", null: false
+    t.boolean "is_winner", default: false, null: false
+    t.jsonb "statistics", default: {}, null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["campaign_id", "message_template_id", "variant"], name: "unique_campaign_template_variant", unique: true
+    t.index ["campaign_id"], name: "idx_campaign_templates_campaign_id"
+    t.index ["message_template_id"], name: "idx_campaign_templates_message_template_id"
   end
 
   create_table "canned_responses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -365,33 +465,41 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   end
 
   create_table "contacts", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.string "name", default: ""
+    t.string "name", default: "", null: false
     t.string "email"
     t.string "phone_number"
-    t.datetime "created_at", precision: nil, null: false
-    t.datetime "updated_at", precision: nil, null: false
-    t.jsonb "additional_attributes", default: {}
+    t.datetime "created_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.jsonb "additional_attributes", default: {}, null: false
     t.string "identifier"
-    t.jsonb "custom_attributes", default: {}
-    t.datetime "last_activity_at", precision: nil
-    t.integer "contact_type", default: 0
-    t.string "middle_name", default: ""
-    t.string "last_name", default: ""
-    t.string "location", default: ""
-    t.string "country_code", default: ""
+    t.jsonb "custom_attributes", default: {}, null: false
+    t.datetime "last_activity_at", precision: 3
+    t.integer "contact_type", default: 0, null: false
+    t.string "middle_name", default: "", null: false
+    t.string "last_name", default: "", null: false
+    t.string "location", default: "", null: false
+    t.string "country_code", default: "", null: false
     t.boolean "blocked", default: false, null: false
+    t.string "avatar_url"
+    t.string "pubsub_token"
+    t.boolean "hmac_verified", default: false, null: false
     t.enum "type", default: "person", null: false, enum_type: "contact_type_enum"
     t.string "tax_id", limit: 14
     t.string "website"
     t.string "industry"
+    t.index "lower((email)::text)", name: "index_contacts_on_lower_email"
+    t.index ["additional_attributes"], name: "index_contacts_on_additional_attributes", using: :gin
     t.index ["blocked"], name: "index_contacts_on_blocked"
-    t.index ["email"], name: "uniq_email_per_account_contact", unique: true
+    t.index ["custom_attributes"], name: "index_contacts_on_custom_attributes", using: :gin
+    t.index ["email", "phone_number", "identifier"], name: "index_contacts_on_nonempty_fields", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
+    t.index ["email"], name: "uniq_email_contact", unique: true, where: "((email IS NOT NULL) AND ((email)::text <> ''::text))"
     t.index ["id"], name: "idx_contacts_with_identity", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
-    t.index ["identifier"], name: "uniq_identifier_per_account_contact", unique: true
-    t.index ["last_activity_at"], name: "index_contacts_on_last_activity_at", order: "DESC NULLS LAST"
+    t.index ["id"], name: "index_resolved_contact", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
+    t.index ["identifier"], name: "uniq_identifier_contact", unique: true
+    t.index ["last_activity_at"], name: "index_contacts_on_last_activity_at"
+    t.index ["last_activity_at"], name: "index_contacts_on_last_activity_at_desc", order: "DESC NULLS LAST"
     t.index ["name", "email", "phone_number", "identifier"], name: "index_contacts_on_name_email_phone_number_identifier", opclass: :gin_trgm_ops, using: :gin
     t.index ["name", "type", "id"], name: "idx_contacts_name_type_resolved", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
-    t.index ["phone_number"], name: "index_contacts_on_phone_number"
     t.index ["tax_id"], name: "index_contacts_on_tax_id", unique: true, where: "(tax_id IS NOT NULL)"
     t.index ["type"], name: "index_contacts_on_type"
   end
@@ -465,16 +573,34 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   create_table "custom_attribute_definitions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "attribute_display_name"
     t.string "attribute_key"
-    t.integer "attribute_display_type", default: 0
+    t.integer "attribute_display_type", default: 0, null: false
     t.integer "default_value"
-    t.integer "attribute_model", default: 0
-    t.datetime "created_at", precision: nil, null: false
-    t.datetime "updated_at", precision: nil, null: false
+    t.integer "attribute_model", default: 0, null: false, comment: "0: contact, 1: conversation"
     t.text "attribute_description"
-    t.jsonb "attribute_values", default: []
+    t.jsonb "attribute_values", default: [], null: false
     t.string "regex_pattern"
     t.string "regex_cue"
+    t.datetime "created_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
     t.index ["attribute_key", "attribute_model"], name: "attribute_key_model_index", unique: true
+  end
+
+  create_table "custom_domains", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "domain", limit: 255, null: false
+    t.boolean "is_verified", default: false, null: false
+    t.string "verification_token", limit: 255
+    t.boolean "is_active", default: true, null: false
+    t.string "ssl_mode", limit: 50, default: "auto", null: false
+    t.text "ssl_certificate"
+    t.text "ssl_private_key"
+    t.string "target_cname", limit: 255
+    t.datetime "last_verified_at", precision: nil
+    t.jsonb "metadata"
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["domain"], name: "IDX_custom_domains_domain", unique: true
+    t.index ["is_verified"], name: "IDX_custom_domains_is_verified"
+    t.unique_constraint ["domain"], name: "UQ_e15fa3631ef1b306a4b4ec1d1b1"
   end
 
   create_table "custom_filters", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -814,14 +940,69 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
     t.jsonb "settings", default: {}
   end
 
+  create_table "journey_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "journey_id", null: false
+    t.uuid "contact_id", null: false
+    t.enum "status", default: "active", null: false, enum_type: "journey_sessions_status_enum"
+    t.string "current_node_id", limit: 255
+    t.jsonb "context", default: {}
+    t.string "workflow_id", limit: 255
+    t.string "workflow_run_id", limit: 255
+    t.string "task_queue", limit: 255
+    t.datetime "started_at", precision: nil
+    t.datetime "completed_at", precision: nil
+    t.datetime "failed_at", precision: nil
+    t.text "error_message"
+    t.jsonb "error_details"
+    t.integer "retry_count", default: 0, null: false
+    t.integer "max_retries", default: 3, null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.jsonb "waiting_for"
+    t.jsonb "variables", default: {}
+    t.jsonb "execution_logs", default: [], null: false
+    t.index ["contact_id"], name: "IDX_journey_sessions_contact_id"
+    t.index ["context"], name: "IDX_journey_sessions_context"
+    t.index ["execution_logs"], name: "IDX_journey_sessions_execution_logs"
+    t.index ["journey_id", "contact_id"], name: "IDX_journey_sessions_journey_contact"
+    t.index ["journey_id", "status"], name: "IDX_journey_sessions_journey_status"
+    t.index ["journey_id"], name: "IDX_journey_sessions_journey_id"
+    t.index ["status"], name: "IDX_journey_sessions_status"
+    t.index ["workflow_id"], name: "IDX_journey_sessions_workflow_id"
+  end
+
+  create_table "journeys", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "name", limit: 255, null: false
+    t.text "description"
+    t.boolean "is_active", default: true, null: false
+    t.jsonb "flow_data", default: {}, null: false
+    t.jsonb "flow_triggers", default: [], null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.jsonb "variables", default: [], null: false
+    t.index ["flow_data"], name: "IDX_journeys_flow_data_gin", using: :gin
+    t.index ["flow_triggers"], name: "IDX_journeys_flow_triggers"
+    t.index ["is_active"], name: "IDX_journeys_is_active"
+    t.index ["variables"], name: "IDX_journeys_variables"
+  end
+
   create_table "labels", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "title"
     t.text "description"
     t.string "color", default: "#1f93ff", null: false
     t.boolean "show_on_sidebar"
-    t.datetime "created_at", precision: nil, null: false
-    t.datetime "updated_at", precision: nil, null: false
+    t.datetime "created_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
     t.index ["title"], name: "index_labels_on_title", unique: true
+  end
+
+  create_table "link_parameters", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
+    t.uuid "short_link_id", null: false
+    t.string "key", limit: 255, null: false
+    t.text "value", null: false
+    t.boolean "is_utm", default: false, null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["short_link_id"], name: "IDX_link_parameters_short_link_id"
   end
 
   create_table "macros", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -898,6 +1079,11 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
     t.index ["inbox_id"], name: "index_messages_on_inbox_id"
     t.index ["sender_type", "sender_id"], name: "index_messages_on_sender_type_and_sender_id"
     t.index ["source_id"], name: "index_messages_on_source_id"
+  end
+
+  create_table "migrations", id: :serial, force: :cascade do |t|
+    t.bigint "timestamp", null: false
+    t.string "name", null: false
   end
 
   create_table "notes", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1023,9 +1209,9 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.uuid "contact_id"
-    t.index ["contact_id", "pipeline_id"], name: "index_pipeline_items_on_contact_id_and_pipeline_id", unique: true, where: "(conversation_id IS NULL)"
+    t.index ["contact_id", "pipeline_id"], name: "idx_pipeline_items_active_contact_per_pipeline", unique: true, where: "((conversation_id IS NULL) AND (completed_at IS NULL))"
     t.index ["contact_id"], name: "index_pipeline_items_on_contact_id"
-    t.index ["conversation_id", "pipeline_id"], name: "index_pipeline_items_on_conversation_id_and_pipeline_id", unique: true, where: "(conversation_id IS NOT NULL)"
+    t.index ["conversation_id", "pipeline_id"], name: "idx_pipeline_items_active_conversation_per_pipeline", unique: true, where: "((conversation_id IS NOT NULL) AND (completed_at IS NULL))"
     t.index ["custom_fields"], name: "index_pipeline_items_on_custom_fields", using: :gin
     t.index ["pipeline_id"], name: "index_pipeline_items_on_pipeline_id"
     t.index ["pipeline_stage_id"], name: "index_pipeline_items_on_pipeline_stage_id"
@@ -1297,6 +1483,90 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
     t.index ["status"], name: "index_scheduled_actions_on_status"
   end
 
+  create_table "scheduled_journey_actions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "journey_id", null: false
+    t.uuid "session_id", null: false
+    t.uuid "contact_id", null: false
+    t.string "node_id", null: false
+    t.jsonb "action_config", default: {}, null: false
+    t.datetime "scheduled_for", precision: nil, null: false
+    t.datetime "executed_at", precision: nil
+    t.string "status", limit: 50, default: "pending", null: false
+    t.text "error_message"
+    t.integer "retry_count", default: 0, null: false
+    t.integer "max_retries", default: 3, null: false
+    t.bigint "scheduled_action_id"
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["contact_id"], name: "IDX_scheduled_journey_actions_contact_id"
+    t.index ["journey_id"], name: "IDX_scheduled_journey_actions_journey_id"
+    t.index ["scheduled_for"], name: "IDX_scheduled_journey_actions_scheduled_for"
+    t.index ["session_id"], name: "IDX_scheduled_journey_actions_session_id"
+    t.index ["status", "scheduled_for"], name: "IDX_scheduled_journey_actions_status_time"
+    t.index ["status"], name: "IDX_scheduled_journey_actions_status"
+  end
+
+  create_table "segments", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "name", limit: 255, null: false
+    t.jsonb "definition", null: false
+    t.string "status", default: "NotStarted", null: false
+    t.string "resource_type", default: "Declarative", null: false
+    t.uuid "subscription_group_id"
+    t.datetime "last_computed_at", precision: nil
+    t.integer "computed_count", default: 0, null: false
+    t.integer "contacts_count", default: 0, null: false
+    t.integer "version", default: 1, null: false
+    t.datetime "definition_updated_at", precision: nil
+    t.datetime "created_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["definition"], name: "index_segments_on_definition", using: :gin
+    t.index ["name"], name: "index_segments_on_name", unique: true
+    t.index ["resource_type"], name: "index_segments_on_resource_type"
+    t.index ["status"], name: "index_segments_on_status"
+  end
+
+  create_table "setup_survey_responses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.string "team_size"
+    t.string "daily_volume"
+    t.string "main_channel"
+    t.string "main_channel_other"
+    t.string "uses_ai"
+    t.string "biggest_pain"
+    t.string "crm_experience"
+    t.string "main_goal"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.datetime "onboarding_pushed_at"
+    t.index ["user_id"], name: "index_setup_survey_responses_on_user_id", unique: true
+  end
+
+  create_table "short_links", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
+    t.string "short_code", limit: 10, null: false
+    t.text "original_url", null: false
+    t.uuid "campaign_id"
+    t.uuid "journey_id"
+    t.uuid "contact_id"
+    t.boolean "is_active", default: true, null: false
+    t.integer "click_count", default: 0, null: false
+    t.datetime "expires_at", precision: nil
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.text "title"
+    t.text "description"
+    t.json "metadata"
+    t.integer "unique_click_count", default: 0, null: false
+    t.uuid "custom_domain_id"
+    t.string "custom_slug", limit: 100
+    t.index ["campaign_id"], name: "IDX_short_links_campaign_id"
+    t.index ["contact_id"], name: "IDX_short_links_contact_id"
+    t.index ["custom_domain_id", "custom_slug"], name: "IDX_short_links_custom_domain_slug", unique: true, where: "((custom_domain_id IS NOT NULL) AND (custom_slug IS NOT NULL))"
+    t.index ["is_active"], name: "IDX_short_links_is_active"
+    t.index ["journey_id"], name: "IDX_short_links_journey_id"
+    t.index ["short_code"], name: "IDX_short_links_short_code", unique: true
+    t.unique_constraint ["short_code"], name: "UQ_60004a8e08ed4e8a88af78e44c7"
+  end
+
   create_table "stage_movements", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "pipeline_item_id", null: false
     t.uuid "from_stage_id"
@@ -1310,13 +1580,13 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   end
 
   create_table "taggings", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.uuid "tag_id"
-    t.string "taggable_type"
-    t.uuid "taggable_id"
+    t.uuid "tag_id", null: false
+    t.string "taggable_type", null: false
+    t.uuid "taggable_id", null: false
     t.string "tagger_type"
     t.uuid "tagger_id"
     t.string "context", limit: 128
-    t.datetime "created_at", precision: nil
+    t.datetime "created_at", precision: 3, default: -> { "CURRENT_TIMESTAMP" }
     t.index ["context"], name: "index_taggings_on_context"
     t.index ["tag_id", "taggable_id", "taggable_type", "context", "tagger_id", "tagger_type"], name: "taggings_idx", unique: true
     t.index ["tag_id"], name: "index_taggings_on_tag_id"
@@ -1329,8 +1599,8 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   end
 
   create_table "tags", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.string "name"
-    t.integer "taggings_count", default: 0
+    t.string "name", null: false
+    t.integer "taggings_count", default: 0, null: false
     t.index ["name"], name: "index_tags_on_name", unique: true
   end
 
@@ -1374,13 +1644,13 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
     t.index ["user_id"], name: "index_user_roles_on_user_id"
   end
 
-  create_table "user_tours", force: :cascade do |t|
+  create_table "user_tours", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "user_id", null: false
     t.string "tour_key", null: false
-    t.string "status", default: "completed", null: false
-    t.datetime "completed_at"
+    t.datetime "completed_at", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "status", default: "completed", null: false
     t.index ["user_id", "tour_key"], name: "index_user_tours_on_user_id_and_tour_key", unique: true
     t.index ["user_id"], name: "index_user_tours_on_user_id"
   end
@@ -1464,6 +1734,10 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   add_foreign_key "agent_bot_inboxes", "agent_bots", column: "facebook_comment_agent_bot_id", on_delete: :nullify
   add_foreign_key "ai_agent_products", "products", on_delete: :cascade
   add_foreign_key "automation_rule_runs", "automation_rules", on_delete: :cascade
+  add_foreign_key "campaign_executions", "campaigns", name: "FK_92f99dae437630d925ac8bb5db5", on_delete: :cascade
+  add_foreign_key "campaigns_contacts", "campaigns", name: "FK_c8b2f054dbe4af4bdcb4a65ec7c", on_delete: :cascade
+  add_foreign_key "campaigns_contacts", "contacts", name: "FK_cd19cb51941f06dec13facdcdbc", on_delete: :cascade
+  add_foreign_key "campaigns_templates", "campaigns", name: "FK_f016140b912f0b533d5102d1027", on_delete: :cascade
   add_foreign_key "contact_companies", "contacts"
   add_foreign_key "contact_companies", "contacts", column: "company_id"
   add_foreign_key "data_privacy_consents", "users"
@@ -1475,6 +1749,9 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   add_foreign_key "evo_core_folder_shares", "evo_core_folders", column: "folder_id", name: "evo_core_folder_shares_folder_id_fkey", on_delete: :cascade
   add_foreign_key "facebook_comment_moderations", "conversations"
   add_foreign_key "facebook_comment_moderations", "messages"
+  add_foreign_key "journey_sessions", "contacts", name: "FK_journey_sessions_contact_id", on_delete: :cascade
+  add_foreign_key "journey_sessions", "journeys", name: "FK_journey_sessions_journey_id", on_delete: :cascade
+  add_foreign_key "link_parameters", "short_links", name: "FK_link_parameters_short_link", on_update: :cascade, on_delete: :cascade
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
   add_foreign_key "pipeline_item_products", "pipeline_items", on_delete: :cascade
@@ -1495,10 +1772,31 @@ ActiveRecord::Schema[7.1].define(version: 9025_08_19_224901) do
   add_foreign_key "scheduled_action_notifications", "scheduled_actions", on_delete: :cascade
   add_foreign_key "scheduled_actions", "contacts", on_delete: :cascade
   add_foreign_key "scheduled_actions", "conversations", on_delete: :cascade
+  add_foreign_key "setup_survey_responses", "users"
+  add_foreign_key "short_links", "contacts", name: "FK_short_links_contact", on_update: :cascade, on_delete: :nullify
+  add_foreign_key "short_links", "custom_domains", name: "FK_short_links_custom_domain", on_delete: :nullify
+  add_foreign_key "short_links", "journeys", name: "FK_short_links_journey", on_update: :cascade, on_delete: :nullify
   add_foreign_key "stage_movements", "pipeline_items"
   add_foreign_key "stage_movements", "pipeline_stages", column: "from_stage_id"
   add_foreign_key "stage_movements", "pipeline_stages", column: "to_stage_id"
   add_foreign_key "user_roles", "roles"
   add_foreign_key "user_roles", "users"
   add_foreign_key "user_roles", "users", column: "granted_by_id"
+  add_foreign_key "user_tours", "users"
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute("CREATE TRIGGER update_campaign_executions_updated_at BEFORE UPDATE ON \"campaign_executions\" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()")
+
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute(<<-SQL)
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+      BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+      END;
+      $function$
+  SQL
+
 end

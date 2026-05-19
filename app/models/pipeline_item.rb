@@ -16,12 +16,12 @@
 #
 # Indexes
 #
-#  index_pipeline_items_on_contact_id                       (contact_id)
-#  index_pipeline_items_on_contact_id_and_pipeline_id       (contact_id,pipeline_id) UNIQUE WHERE (conversation_id IS NULL)
-#  index_pipeline_items_on_conversation_id_and_pipeline_id  (conversation_id,pipeline_id) UNIQUE WHERE (conversation_id IS NOT NULL)
-#  index_pipeline_items_on_custom_fields                    (custom_fields) USING gin
-#  index_pipeline_items_on_pipeline_id                      (pipeline_id)
-#  index_pipeline_items_on_pipeline_stage_id                (pipeline_stage_id)
+#  idx_pipeline_items_active_contact_per_pipeline       (contact_id,pipeline_id) UNIQUE WHERE ((conversation_id IS NULL) AND (completed_at IS NULL))
+#  idx_pipeline_items_active_conversation_per_pipeline  (conversation_id,pipeline_id) UNIQUE WHERE ((conversation_id IS NOT NULL) AND (completed_at IS NULL))
+#  index_pipeline_items_on_contact_id                   (contact_id)
+#  index_pipeline_items_on_custom_fields                (custom_fields) USING gin
+#  index_pipeline_items_on_pipeline_id                  (pipeline_id)
+#  index_pipeline_items_on_pipeline_stage_id            (pipeline_stage_id)
 #
 # Foreign Keys
 #
@@ -45,8 +45,10 @@ class PipelineItem < ApplicationRecord
   has_many :products, through: :pipeline_item_products
   has_many :product_variants, through: :pipeline_item_products
 
-  validates :conversation_id, uniqueness: { scope: :pipeline_id }, allow_nil: true
-  validates :contact_id, uniqueness: { scope: :pipeline_id }, allow_nil: true
+  validates :conversation_id, uniqueness: { scope: :pipeline_id, conditions: -> { where(completed_at: nil) },
+                                            message: 'already has an active journey in this pipeline' }, allow_nil: true
+  validates :contact_id, uniqueness: { scope: :pipeline_id, conditions: -> { where(completed_at: nil) },
+                                       message: 'already has an active journey in this pipeline' }, allow_nil: true
   validate :must_have_conversation_or_contact
   validate :validate_custom_fields_structure
 
@@ -60,6 +62,8 @@ class PipelineItem < ApplicationRecord
   after_destroy :publish_pipeline_item_deleted
 
   scope :in_stage, ->(stage) { where(pipeline_stage: stage) }
+  scope :active, -> { where(completed_at: nil) }
+  scope :completed, -> { where.not(completed_at: nil) }
 
   def move_to_stage(new_stage, _moved_by = nil)
     return false if new_stage.pipeline != pipeline
