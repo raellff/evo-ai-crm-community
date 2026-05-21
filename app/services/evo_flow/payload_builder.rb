@@ -3,6 +3,10 @@ module EvoFlow
   # track  -> TrackEventDto    (uses `event`)
   # identify -> IdentifyEventDto (uses `eventName`)
   # See evo-flow/src/modules/events/dto/*.
+  #
+  # InvalidEventName lives in app/services/evo_flow/invalid_event_name.rb
+  # (its constructor formats the full "Unknown EvoFlow event_name: …" message
+  # including the allowed list, so callers here just pass the bad value).
   class PayloadBuilder
     # Exactly 5 kwargs (RuboCop ParameterLists max 5 — do not add a 6th).
     def self.build_track(event_name:, contact_id:, properties:, occurred_at:, message_id:)
@@ -27,14 +31,18 @@ module EvoFlow
       }
     end
 
-    # AC6: raise on event_name outside EvoFlow::EVENT_NAMES (caught in CI, not prod —
-    # listeners rescue StandardError and tag enqueue-loss). Prevents typo'd or
-    # legacy event names from silently shipping to evo-flow / ClickHouse.
+    # AC6: raise on event_name outside EvoFlow::EVENT_NAMES.
+    # Caught in CI (specs) and in production by PublishEventWorker
+    # (rescued as an F4 exception — logged + dropped, not retried, since
+    # an invalid name is a code bug and retries won't fix it).
+    # The single source of truth for the canonical list is
+    # lib/events/evo_flow_event_names.rb (EvoFlow::EVENT_NAMES).
     def self.validate_event_name!(event_name)
       return if EvoFlow::EVENT_NAMES.include?(event_name)
 
       raise EvoFlow::InvalidEventName, event_name
     end
+    private_class_method :validate_event_name!
 
     # Deterministic, forward-looking idempotency key. NOTE: evo-flow has no
     # consumer-side dedup yet (clickhouse contact_events is MergeTree); Sidekiq

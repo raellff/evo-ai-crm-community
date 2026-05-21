@@ -11,6 +11,16 @@ module EvoFlow
   #
   # Signature is perform(path, payload) — Client#post needs the target path;
   # documented divergence from EVO-1238's perform(payload).
+  #
+  # Exceptions to F4: EvoFlow::InvalidEventName and EvoFlow::ConfigurationError
+  # are NOT retried — both are code/config bugs, not transient failures
+  # (rescued earliest in #perform, logged + dropped). Configuration won't fix
+  # itself on retry; retrying just floods the Dead Set with the same env-var
+  # error and triggers spurious :evo_flow_publish_failed broadcasts.
+  # Drops still emit Wisper :evo_flow_publish_dropped (data[:reason]) so that
+  # alerts can fire on "integration silently parked" — distinct from the
+  # transient :evo_flow_publish_failed channel that listeners may treat as
+  # retry/escalation noise.
   class PublishEventWorker
     include Sidekiq::Worker
     sidekiq_options queue: :integrations, retry: 5
@@ -34,6 +44,16 @@ module EvoFlow
 
       def broadcast_failed(path:, payload:, error:)
         publish('evo_flow_publish_failed', data: { path: path, payload: payload, error: error })
+      end
+
+      # F4 drops (InvalidEventName / ConfigurationError) are deliberate, not
+      # transient — emit a distinct event so alerts can wire to "integration
+      # silently parked" without firing on the retry-then-Dead-Set path.
+      def broadcast_dropped(reason:, path:, error_message:)
+        publish(
+          'evo_flow_publish_dropped',
+          data: { reason: reason, path: path, error_message: error_message }
+        )
       end
     end
 
@@ -66,6 +86,33 @@ module EvoFlow
     def perform(path, payload)
       EvoFlow::Client.new.post(path, payload)
       Rails.logger.info("[EvoFlow] published path=#{path} messageId=#{message_id(payload)}")
+    rescue EvoFlow::InvalidEventName => e
+      # Defense-in-depth: PayloadBuilder.validate_event_name! already runs at
+      # enqueue time, so this rescue is theoretically unreachable in prod.
+      # Kept to protect against (a) console / rake / one-off scripts that
+      # construct payloads without going through PayloadBuilder, and (b) jobs
+      # queued before an EVENT_NAMES shrink that replay after deploy.
+      # Behaviour: log + broadcast :evo_flow_publish_dropped so alerts fire,
+      # then return nil — Sidekiq sees success (no retry, no Dead Set entry,
+      # no spurious :evo_flow_publish_failed). MUST stay above the
+      # StandardError rescue (InvalidEventName < StandardError).
+      Rails.logger.error("[EvoFlow] dropped: invalid event_name path=#{path} msg=#{e.message}")
+      FailureBroadcaster.new.broadcast_dropped(
+        reason: :invalid_event_name, path: path, error_message: e.message
+      )
+      nil
+    rescue EvoFlow::ConfigurationError => e
+      # F4 exception: env/config bug, not transient. Retrying just floods the
+      # Dead Set with the same env-var error. Drop the job (Sidekiq sees
+      # success) and emit :evo_flow_publish_dropped so "integration parked"
+      # is observable to alerts — without this, a missing
+      # AUTH_APIKEY_INTEGRATION_LOCAL silently halts 100% of EvoFlow traffic
+      # behind only a log line. MUST stay above the StandardError rescue.
+      Rails.logger.error("[EvoFlow] dropped: configuration error path=#{path} msg=#{e.message}")
+      FailureBroadcaster.new.broadcast_dropped(
+        reason: :configuration_error, path: path, error_message: e.message
+      )
+      nil
     rescue EvoFlow::HTTPError => e
       Rails.logger.warn(
         "[EvoFlow] publish failed (will retry) path=#{path} code=#{e.code} msg=#{e.message}"
