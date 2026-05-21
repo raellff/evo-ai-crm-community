@@ -16,10 +16,11 @@
 # Both flavours land in the same async job. The controller does the bare
 # minimum: HMAC validation, capture of X-Hub-Delivery-Id, enqueue, 200 OK.
 module Webhooks
-  class EvolutionHubController < ApplicationController
+  # Public endpoint — uses ActionController::API (no session, no CSRF, no
+  # app-level auth filters) just like Webhooks::FacebookController. Auth is
+  # done by the HMAC signature, not by a Bearer.
+  class EvolutionHubController < ActionController::API
     include EvolutionHubSignatureConcern
-
-    skip_before_action :verify_authenticity_token
 
     def create
       return unless verify_evolution_hub_signature!

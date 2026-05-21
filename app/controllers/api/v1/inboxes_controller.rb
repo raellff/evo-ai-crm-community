@@ -619,7 +619,6 @@ module Api
         # frontend uses to open the Hub connect flow in a new tab.
         def create_via_evolution_hub
           result = EvolutionHub::InboxBuilder.new(
-            account: Current.account,
             channel_type: params[:inbox][:channel_type].to_s,
             name: params[:inbox][:name].to_s
           ).perform

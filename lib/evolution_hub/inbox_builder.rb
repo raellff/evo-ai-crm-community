@@ -24,8 +24,7 @@ module EvolutionHub
 
     class UnsupportedChannelType < StandardError; end
 
-    def initialize(account:, channel_type:, name:)
-      @account = account
+    def initialize(channel_type:, name:)
       @channel_type = channel_type.to_s
       @name = name.to_s.presence || "#{@channel_type.humanize} via Evolution Hub"
     end
@@ -50,11 +49,8 @@ module EvolutionHub
     end
 
     def crm_webhook_url
-      # Built off the configured CRM URL. We must include the route prefix
-      # the routes file uses (api/v2/accounts/:id/webhooks/evolution_hub).
-      account_id = @account.id
       base = ENV.fetch('FRONTEND_URL') { Rails.application.routes.default_url_options[:host] || 'http://localhost:3000' }
-      "#{base.chomp('/')}/webhooks/accounts/#{account_id}/evolution_hub"
+      "#{base.chomp('/')}/webhooks/evolution_hub"
     end
 
     def webhook_secret
@@ -71,7 +67,6 @@ module EvolutionHub
 
     def build_whatsapp
       Channel::Whatsapp.create!(
-        account: @account,
         phone_number: pending_phone_placeholder,
         provider: 'whatsapp_cloud',
         provider_config: {
@@ -85,7 +80,6 @@ module EvolutionHub
 
     def build_facebook
       Channel::FacebookPage.create!(
-        account: @account,
         user_access_token: '',
         page_access_token: '',
         page_id: "pending_#{SecureRandom.hex(6)}",
@@ -95,7 +89,6 @@ module EvolutionHub
 
     def build_instagram
       Channel::Instagram.create!(
-        account: @account,
         access_token: '',
         instagram_id: "pending_#{SecureRandom.hex(6)}",
         expires_at: 60.days.from_now,
@@ -151,7 +144,6 @@ module EvolutionHub
 
     def create_inbox(channel)
       Inbox.create!(
-        account: @account,
         channel: channel,
         name: @name
       )
