@@ -14,7 +14,7 @@ class Instagram::Messenger::SendOnInstagramService < Instagram::BaseSendService
     query[:appsecret_proof] = app_secret_proof if app_secret_proof
 
     response = HTTParty.post(
-      'https://graph.facebook.com/v11.0/me/messages',
+      "#{MetaBaseUrl.for(:instagram_messenger)}/me/messages",
       body: message_content,
       query: query
     )

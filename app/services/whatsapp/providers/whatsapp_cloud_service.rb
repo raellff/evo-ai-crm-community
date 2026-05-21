@@ -49,7 +49,7 @@ module Whatsapp
         return if whatsapp_channel.provider_config['waba_id'].blank?
 
         HTTParty.post(
-          "#{api_base_path}/v23.0/#{whatsapp_channel.provider_config['waba_id']}/subscribed_apps",
+          "#{api_base_path}/#{whatsapp_channel.provider_config['waba_id']}/subscribed_apps",
           headers: api_headers
         )
       end
@@ -58,7 +58,7 @@ module Whatsapp
         return if whatsapp_channel.provider_config['waba_id'].blank?
 
         HTTParty.delete(
-          "#{api_base_path}/v23.0/#{whatsapp_channel.provider_config['waba_id']}/subscribed_apps",
+          "#{api_base_path}/#{whatsapp_channel.provider_config['waba_id']}/subscribed_apps",
           headers: api_headers
         )
       end
@@ -92,27 +92,46 @@ module Whatsapp
       end
 
       def api_headers
-        { 'Authorization' => "Bearer #{whatsapp_channel.provider_config['api_key']}",
+        { 'Authorization' => "Bearer #{meta_bearer_token}",
           'Content-Type' => 'application/json' }
       end
 
-      def media_url(media_id)
-        "#{api_base_path}/v23.0/#{media_id}"
+      # When the Evolution Hub is enabled, all Meta calls go through the Hub's
+      # transparent proxy at api.evohub.ai/meta/*. The Hub identifies the
+      # channel by the channel_token (returned at create time, stored under
+      # provider_config['evolution_hub']['channel_token']) and swaps it for
+      # the real Meta access_token internally. So we never need to persist
+      # the Meta token locally in Hub mode — and we couldn't, since the Hub
+      # doesn't expose it.
+      def meta_bearer_token
+        if MetaBaseUrl.enabled?
+          whatsapp_channel.provider_config.dig('evolution_hub', 'channel_token').presence ||
+            whatsapp_channel.provider_config['api_key']
+        else
+          whatsapp_channel.provider_config['api_key']
+        end
       end
 
+      def media_url(media_id)
+        "#{api_base_path}/#{media_id}"
+      end
+
+      # Returns the URL prefix INCLUDING the API version (e.g. `.../v23.0`).
+      # When the Evolution Hub feature is enabled and configured, returns the
+      # Hub's transparent proxy URL instead of graph.facebook.com.
       def api_base_path
-        ENV.fetch('WHATSAPP_CLOUD_BASE_URL', 'https://graph.facebook.com')
+        MetaBaseUrl.for(:whatsapp)
       end
 
       # TODO: See if we can unify the API versions and for both paths and make it consistent with out facebook app API versions
       def phone_id_path
-        "#{api_base_path}/v23.0/#{whatsapp_channel.provider_config['phone_number_id']}"
+        "#{api_base_path}/#{whatsapp_channel.provider_config['phone_number_id']}"
       end
 
       def business_account_path
         # Use waba_id for accessing message_templates, fallback to business_account_id for backward compatibility
         waba_id = whatsapp_channel.provider_config['waba_id'] || whatsapp_channel.provider_config['business_account_id']
-        "#{api_base_path}/v23.0/#{waba_id}"
+        "#{api_base_path}/#{waba_id}"
       end
 
       def send_text_message(phone_number, message)
@@ -242,7 +261,7 @@ module Whatsapp
         validate_template_editable(template)
 
         # Para editar templates, usar o endpoint específico do template
-        update_url = "#{api_base_path}/v23.0/#{template_id}"
+        update_url = "#{api_base_path}/#{template_id}"
         Rails.logger.info "WhatsApp Cloud update_template request URL: #{update_url}"
         Rails.logger.info "WhatsApp Cloud update_template request headers: #{api_headers.inspect}"
 
@@ -386,7 +405,7 @@ module Whatsapp
         response = File.open(file_path, 'rb') do |file_io|
           HTTParty.post(
             "#{phone_id_path}/media",
-            headers: { 'Authorization' => "Bearer #{whatsapp_channel.provider_config['api_key']}" },
+            headers: { 'Authorization' => "Bearer #{meta_bearer_token}" },
             multipart: true,
             body: {
               messaging_product: 'whatsapp',

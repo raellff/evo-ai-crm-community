@@ -24,6 +24,24 @@ Rails.application.reloader.to_prepare do
     config.provider = EvolutionFbProvider.new
   end
 
+  # Monkey-patch the facebook-messenger gem to route outbound Bot.deliver
+  # calls through the Evolution Hub when the feature is enabled.
+  #
+  # The gem hard-codes `https://graph.facebook.com` in Facebook::Messenger::Bot.
+  # We patch the constant to honour MetaBaseUrl.for(:facebook) — which is what
+  # MetaBaseUrl returns when Hub is OFF anyway, so the patch is safe at all
+  # times. The reloader runs after MetaBaseUrl is loaded and after the DB is
+  # ready, so GlobalConfigService.load works.
+  if defined?(Facebook::Messenger::Bot) && defined?(MetaBaseUrl)
+    Facebook::Messenger::Bot.singleton_class.class_eval do
+      define_method(:base_uri) do
+        # Returns the URL WITHOUT trailing /vXX.0 — the gem appends "/me/messages"
+        # or "/{page_id}/messages" itself. MetaBaseUrl returns ".../v23.0".
+        MetaBaseUrl.for(:facebook)
+      end
+    end
+  end
+
   Facebook::Messenger::Bot.on :message do |message|
     Webhooks::FacebookEventsJob.perform_later(message.to_json)
   end

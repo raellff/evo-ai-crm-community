@@ -83,7 +83,7 @@ class Facebook::SendCommentService < Base::SendOnChannelService
   end
 
   def send_graph_api_request(endpoint:, params:)
-    url = "https://graph.facebook.com/v18.0/#{endpoint}"
+    url = "#{MetaBaseUrl.for(:facebook)}/#{endpoint}"
 
     Rails.logger.info("Facebook::SendCommentService: POST #{url}")
     Rails.logger.debug("Facebook::SendCommentService: Params: #{params.except('access_token').inspect}")

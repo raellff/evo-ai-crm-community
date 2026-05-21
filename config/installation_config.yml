@@ -397,6 +397,31 @@
   type: secret
 ## ------ End of Configs added for Evolution Go ------ ##
 
+## ------ Configs added for Evolution Hub (Meta proxy) ------ ##
+- name: EVOLUTION_HUB_ENABLED
+  display_title: 'Evolution Hub Enabled'
+  value: false
+  locked: false
+  description: 'When true, route all Meta Cloud API calls (WhatsApp Cloud, Facebook Messenger, Instagram) through the configured Evolution Hub instance instead of graph.facebook.com directly.'
+- name: EVOLUTION_HUB_URL
+  display_title: 'Evolution Hub URL'
+  value:
+  locked: false
+  description: 'Base URL of the Evolution Hub instance, e.g. https://api.evohub.ai. Used both for outbound /meta/* proxying and for channel/webhook creation.'
+- name: EVOLUTION_HUB_API_KEY
+  display_title: 'Evolution Hub API Key'
+  value:
+  locked: false
+  description: 'API key generated in the Hub admin panel. Used for channel and webhook management calls only — outbound Meta proxy traffic carries the channel token instead.'
+  type: secret
+- name: EVOLUTION_HUB_WEBHOOK_SECRET
+  display_title: 'Evolution Hub Webhook Secret'
+  value:
+  locked: false
+  description: 'Shared HMAC-SHA256 secret used to sign webhooks the Hub posts to /webhooks/evolution_hub on this CRM. Keep distinct from META_APP_SECRET.'
+  type: secret
+## ------ End of Configs added for Evolution Hub ------ ##
+
 ## ------ Configs added for Twitter Channel ------ ##
 - name: TWITTER_APP_ID
   display_title: 'Twitter App ID'

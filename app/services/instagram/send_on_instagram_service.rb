@@ -13,7 +13,7 @@ class Instagram::SendOnInstagramService < Instagram::BaseSendService
     instagram_id = channel.instagram_id.presence || 'me'
 
     response = HTTParty.post(
-      "https://graph.instagram.com/v23.0/#{instagram_id}/messages",
+      "#{MetaBaseUrl.for(:instagram)}/#{instagram_id}/messages",
       body: message_content,
       query: query
     )
