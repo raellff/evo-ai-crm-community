@@ -120,9 +120,24 @@ EvoExtensionPoints::PluginLoader.register_plugin(:my_consumer) do |plugin|
 end
 ```
 
+**Host-side consumption.** The host invokes the registered callbacks at
+two points in the boot sequence:
+
+- `on_boot` — driven by `PluginLoader.load_all`, called from
+  `config/initializers/evo_extension_points.rb` in an `after_initialize`
+  hook.
+- `routes` — driven by `PluginLoader.draw_routes(mapper)`, called from
+  `config/routes.rb` at the end of the `Rails.application.routes.draw`
+  block. The `mapper` is the routing mapper (`self` of the draw block).
+  Both are no-ops in the community release — the registry is empty until
+  a consumer gem registers a plugin. A consumer's `Railtie`/`Engine`
+  initializer MUST run before route drawing, so the `routes` callback is
+  present when `draw_routes` iterates the registry.
+
 **Breaking-change policy:** removing or renaming `register_plugin`,
-`plugins`, `on_boot` or `routes` is a major bump. Adding new lifecycle
-hooks (`on_shutdown`, `on_request_start`, etc.) is a minor bump.
+`plugins`, `on_boot`, `routes`, `load_all` or `draw_routes` is a major
+bump. Adding new lifecycle hooks (`on_shutdown`, `on_request_start`,
+etc.) is a minor bump.
 
 ### 4. `theme_tokens`
 
