@@ -77,6 +77,21 @@ RSpec.describe EvoExtensionPoints do
       described_class.load_all
       expect(booted).to eq([:demo])
     end
+
+    it 'draw_routes is a no-op when nothing is registered' do
+      mapper = double('mapper')
+      expect { described_class.draw_routes(mapper) }.not_to raise_error
+    end
+
+    it 'draw_routes invokes every plugin routes callback with the mapper' do
+      mapper = double('mapper')
+      received = []
+      described_class.register_plugin(:demo) do |plugin|
+        plugin.routes { |m| received << m }
+      end
+      described_class.draw_routes(mapper)
+      expect(received).to eq([mapper])
+    end
   end
 
   describe EvoExtensionPoints::ThemeTokens do

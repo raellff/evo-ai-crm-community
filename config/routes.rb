@@ -733,5 +733,9 @@ Rails.application.routes.draw do
     post 'onboarding', to: 'onboarding#create'
   end
 
+  # Enterprise / consumer plugins mount their routes through the plugin_loader
+  # extension point. No-op in the community release — the registry is empty
+  # unless a consumer gem registers a plugin. See EXTENSION_POINTS.md §3.
+  EvoExtensionPoints::PluginLoader.draw_routes(self)
 
 end

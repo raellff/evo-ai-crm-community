@@ -55,6 +55,19 @@ module EvoExtensionPoints
         nil
       end
 
+      # Host-side counterpart of load_all for the `routes` lifecycle hook.
+      # The host calls this from inside `config/routes.rb` so every registered
+      # plugin can mount its engine/routes onto the application router. The
+      # given +mapper+ is the routing mapper (the `self` of a `routes.draw`
+      # block). No-op in the community release — `registry` is empty until a
+      # consumer gem registers a plugin.
+      def draw_routes(mapper)
+        registry.each_value do |registration|
+          registration.routes_callbacks.each { |callback| callback.call(mapper) }
+        end
+        nil
+      end
+
       def reset!
         @registry = nil
       end
