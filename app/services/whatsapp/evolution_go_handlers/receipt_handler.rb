@@ -48,14 +48,7 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
       Rails.logger.warn "Evolution Go API: Missing messages for receipt: #{missing_ids.first(5).join(', ')}#{missing_ids.size > 5 ? " and #{missing_ids.size - 5} more" : ''}"
     end
 
-    # Bulk update messages that can be updated
-    updatable_messages = messages.select { |msg| can_update_message_status?(msg, status) }
-    if updatable_messages.any?
-      Message.where(id: updatable_messages.map(&:id)).update_all(status: status)
-      updatable_messages.each do |message|
-        Rails.logger.debug { "Evolution Go API: Bulk updated message #{message.source_id} to #{status}" }
-      end
-    end
+    bulk_update_and_publish(messages.select { |msg| can_update_message_status?(msg, status) }, status)
 
     # Update contact activity for outgoing messages
     outgoing_messages = messages.outgoing
@@ -66,6 +59,26 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
                       .distinct
 
     contacts.update_all(last_activity_at: Time.current)
+  end
+
+  # Capture previous_status BEFORE update_all so per-row Wisper events report
+  # accurate transitions. The publish loop runs OUTSIDE the transaction so a
+  # listener failure does not roll back the DB write.
+  def bulk_update_and_publish(updatable_messages, status)
+    return if updatable_messages.empty?
+
+    previous_by_id = updatable_messages.to_h { |m| [m.id, m.status] }
+    Message.transaction do
+      Message.where(id: previous_by_id.keys).update_all(status: status) # rubocop:disable Rails/SkipsModelValidations
+    end
+
+    # canonical: Messages::StatusUpdateService#perform — inlined here to
+    # preserve bulk update_all performance.
+    publisher = Whatsapp::EvolutionGoHandlers::BulkStatusPublisher.new
+    Message.where(id: previous_by_id.keys).find_each do |m|
+      publisher.emit(m, previous_by_id[m.id], status)
+      Rails.logger.debug { "Evolution Go API: Bulk updated message #{m.source_id} to #{status}" }
+    end
   end
 
   def update_contact_activity_for_bulk_receipts(messages, status, receipt_data)
@@ -89,8 +102,7 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
     message = find_message_by_source_id_for_receipt(message_id, _receipt_data)
     return unless message && can_update_message_status?(message, status)
 
-    # Update message status
-    message.update!(status: status)
+    Messages::StatusUpdateService.new(message, status).perform
     Rails.logger.debug { "Evolution Go API: Updated message #{message.source_id} to #{status}" }
   end
 
@@ -115,11 +127,10 @@ module Whatsapp::EvolutionGoHandlers::ReceiptHandler
       return
     end
 
-    # Update the message status
-    if message.update(status: status)
+    if Messages::StatusUpdateService.new(message, status).perform
       Rails.logger.info "Evolution Go API: Updated message #{message_id} status to #{status}"
     else
-      Rails.logger.error "Evolution Go API: Failed to update message #{message_id}: #{message.errors.full_messages.join(', ')}"
+      Rails.logger.error "Evolution Go API: Failed to update message #{message_id}"
     end
   end
 

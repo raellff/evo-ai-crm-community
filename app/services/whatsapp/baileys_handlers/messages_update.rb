@@ -29,7 +29,14 @@ module Whatsapp::BaileysHandlers::MessagesUpdate
   def update_status
     status = status_mapper
     update_last_seen_at if incoming? && status == 'read'
-    @message.update!(status: status) if status.present? && status_transition_allowed?(status)
+    return if status.blank?
+    # Baileys-specific rules NOT in Messages::StatusUpdateService:
+    #  - read is final (no downgrade to anything)
+    #  - delivered must not downgrade back to sent
+    return if @message.read?
+    return if @message.delivered? && status == 'sent'
+
+    Messages::StatusUpdateService.new(@message, status).perform
   end
 
   def status_mapper
@@ -64,13 +71,6 @@ module Whatsapp::BaileysHandlers::MessagesUpdate
     to_update[:assignee_last_seen_at] = Time.current if conversation.assignee_id.present?
 
     conversation.update_columns(to_update) # rubocop:disable Rails/SkipsModelValidations
-  end
-
-  def status_transition_allowed?(new_status)
-    return false if @message.status == 'read'
-    return false if @message.status == 'delivered' && new_status == 'sent'
-
-    true
   end
 
   def handle_edited_content
