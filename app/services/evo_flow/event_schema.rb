@@ -16,6 +16,19 @@ module EvoFlow
       DEFINITIONS[event_name]
     end
 
+    # Recursively freezes a hash and any nested hash values so runtime code
+    # cannot mutate the schema (defense against accidental in-process edits).
+    # Plain `.each_value(&:freeze)` only freezes the outer entries; the
+    # inner `required:` / `optional:` hashes stay mutable without this.
+    def self.deep_freeze(obj)
+      case obj
+      when Hash
+        obj.each_value { |v| deep_freeze(v) }
+        obj.freeze
+      end
+      obj
+    end
+
     DEFINITIONS = {
     'contact.created' => {
       category: :contact,
@@ -138,7 +151,7 @@ module EvoFlow
       required: {},
       optional: {}
     }
-    }.each_value(&:freeze).freeze
+    }.tap { |defs| deep_freeze(defs) }
 
     # Sanity check at load time: every EVENT_NAME must have a schema entry.
     # Mirrors the TS-side assertCatalogCoversAllNames().

@@ -149,6 +149,24 @@ RSpec.describe EvoFlow::SchemaValidator do
       end
     end
 
+    # F4: deep-freeze invariant — defends against runtime mutation of the
+    # schema by production code.
+    context 'F4: schema is deep-frozen' do
+      it 'freezes the outer DEFINITIONS hash' do
+        expect(EvoFlow::EventSchema::DEFINITIONS).to be_frozen
+      end
+
+      it 'freezes per-event entry hashes' do
+        expect(EvoFlow::EventSchema::DEFINITIONS['message.delivered']).to be_frozen
+      end
+
+      it 'freezes nested required/optional hashes' do
+        entry = EvoFlow::EventSchema::DEFINITIONS['message.delivered']
+        expect(entry[:required]).to be_frozen
+        expect(entry[:optional]).to be_frozen
+      end
+    end
+
     context 'type validation' do
       it 'rejects boolean where uuid is expected' do
         expect do
