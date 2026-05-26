@@ -6,7 +6,6 @@ class Messages::NewMessageNotificationService
 
     notify_conversation_assignee
     notify_participating_users
-    notify_inbox_members_if_unassigned
   end
 
   private
@@ -36,26 +35,6 @@ class Messages::NewMessageNotificationService
       NotificationBuilder.new(
         notification_type: 'participating_conversation_new_message',
         user: participant,
-        primary_actor: message.conversation,
-        secondary_actor: message
-      ).perform
-    end
-  end
-
-  # Notify all inbox members when conversation has no assignee.
-  # Guards against brand-new conversations (< 2 minutes old) since the
-  # conversation_created event already notifies inbox members for those.
-  def notify_inbox_members_if_unassigned
-    return unless conversation.assignee.blank?
-    return if conversation.created_at > 2.minutes.ago
-
-    conversation.inbox.members.each do |member|
-      next if already_notified?(member)
-      next if member == sender
-
-      NotificationBuilder.new(
-        notification_type: 'assigned_conversation_new_message',
-        user: member,
         primary_actor: message.conversation,
         secondary_actor: message
       ).perform
