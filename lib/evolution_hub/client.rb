@@ -126,9 +126,9 @@ module EvolutionHub
     private
 
     def base_url
-      url = MetaBaseUrl.hub_url
-      raise ConfigurationError, 'EVOLUTION_HUB_URL not configured' if url.blank?
-      url
+      # URL é hardcoded em MetaBaseUrl::HUB_API_URL — não precisa checar
+      # vazio aqui.
+      MetaBaseUrl.hub_url
     end
 
     def api_key

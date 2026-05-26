@@ -162,10 +162,7 @@ module EvolutionHub
 
     def build_public_link(channel_token)
       return nil if channel_token.blank?
-      hub_frontend = ENV.fetch('EVOLUTION_HUB_FRONTEND_URL') do
-        MetaBaseUrl.hub_url.sub(/(\Ahttps?:\/\/)api\./, '\1app.')
-      end
-      "#{hub_frontend.chomp('/')}/connect/#{channel_token}"
+      "#{MetaBaseUrl.hub_frontend_url}/connect/#{channel_token}"
     end
 
     def extract_public_link(hub_response)
