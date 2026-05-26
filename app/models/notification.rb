@@ -138,7 +138,10 @@ class Notification < ApplicationRecord
     when 'conversation_creation'
       conversation&.messages&.first&.sender
     when 'conversation_assignment'
-      (conversation&.messages&.incoming&.last || conversation&.messages&.outgoing&.last)&.sender
+      # Sender for assignment events needs a product decision (assigner vs assignee);
+      # the last message author is misleading. Out of scope here — return nil so the
+      # REST/WS payload omits sender and the UI falls back to the conversation contact.
+      nil
     when 'pipeline_task_assigned', 'pipeline_task_due_soon', 'pipeline_task_overdue', 'pipeline_task_completed'
       nil # task events have no message actor; title/preview/sender not in scope for this iteration
     end

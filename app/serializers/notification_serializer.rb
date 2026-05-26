@@ -48,7 +48,7 @@ module NotificationSerializer
         result[:sender] = {
           id: sender.id,
           name: sender.name,
-          avatar_url: sender.avatar_url,
+          avatar_url: sender.try(:avatar_url),
           type: sender.class.name
         }
       end
@@ -141,7 +141,7 @@ module NotificationSerializer
     when Message
       sender = actor.sender
       data = { id: actor.id, content: actor.content&.truncate(50), type: 'Message' }
-      data[:sender] = { id: sender.id, name: sender.name, avatar_url: sender.avatar_url, type: sender.class.name } if sender.present?
+      data[:sender] = { id: sender.id, name: sender.name, avatar_url: sender.try(:avatar_url), type: sender.class.name } if sender.present?
       data
     else
       { id: actor.id, type: actor.class.name }
