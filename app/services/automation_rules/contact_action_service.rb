@@ -10,6 +10,13 @@
 # recorded on the run as `skipped` with a reason, so the outcome is observable
 # in the automation logs (`automation_rule_runs`).
 class AutomationRules::ContactActionService
+  # EVO-1642: contact-level labels are the canonical implementations in the
+  # shared module — included here so this executor stops hand-rolling its own
+  # add_label/remove_label. `@contact` is set and `@conversation` is nil, so
+  # they take the contact branch. `send_webhook_event` stays local because the
+  # contact webhook event string is a live external contract (see below).
+  include AutomationRules::ConversationActionHandlers
+
   # Actions that operate on the contact itself and need no conversation.
   CONTACT_NATIVE_ACTIONS = %w[send_webhook_event add_label remove_label].freeze
 
@@ -65,36 +72,17 @@ class AutomationRules::ContactActionService
     end
   end
 
+  # Kept local (not delegated to the shared module): the contact webhook event
+  # string is a LIVE external contract — integrations filter on
+  # `contact_created`/`contact_updated`. Only the dormant flow executor was
+  # unified to `automation_event.*` (EVO-1641 review). Also guards a blank URL.
   def send_webhook_event(action_params)
     webhook_url = action_params.is_a?(Array) ? action_params[0] : action_params
     return if webhook_url.blank?
 
     clean_url = webhook_url.to_s.strip
-    # EVO-1641: the contact webhook string is a LIVE external contract
-    # (integrations filter on `contact_created`/`contact_updated`), so it stays
-    # as-is. Only the dormant flow executor was unified to `automation_event.*`.
     payload = (@contact.webhook_data || {}).merge(event: "contact_#{@rule.event_name.split('_').last}")
     WebhookJob.perform_later(clean_url, payload)
     Rails.logger.info "Automation Rule #{@rule.id}: Sent webhook to #{clean_url} for contact #{@contact.id}"
-  end
-
-  def add_label(label_ids)
-    labels = Label.where(id: label_ids)
-    return if labels.empty?
-
-    # Route through the setter so `saved_change_to_label_list?` dirty-tracks the
-    # change and Contact#publish_label_changes fires (mirrors FlowExecutionService).
-    titles = labels.pluck(:title)
-    @contact.update!(label_list: (@contact.label_list + titles).uniq)
-    Rails.logger.info "Automation Rule #{@rule.id}: Added #{labels.count} labels to contact #{@contact.id}"
-  end
-
-  def remove_label(label_ids)
-    labels = Label.where(id: label_ids)
-    return if labels.empty?
-
-    titles = labels.pluck(:title)
-    @contact.update!(label_list: @contact.label_list - titles)
-    Rails.logger.info "Automation Rule #{@rule.id}: Removed #{labels.count} labels from contact #{@contact.id}"
   end
 end
