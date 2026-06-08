@@ -336,6 +336,26 @@ class AutomationRuleListener < BaseListener
     end
   end
 
+  # EVO-1642 (shadow phase): run the SQL ConditionsFilterService alongside the
+  # authoritative Ruby evaluator and log any disagreement, so we can prove prod
+  # parity before retiring the Ruby path. Behaviour is unchanged — Ruby stays
+  # authoritative — and a failing shadow must never break the live run.
+  def shadow_compare_contact_conditions(rule, contact, changed_attributes, ruby_match)
+    sql_match = ::AutomationRules::ConditionsFilterService.new(
+      rule, nil, { contact: contact, changed_attributes: changed_attributes }
+    ).perform
+
+    # Both evaluators already return booleans; compare directly.
+    return if sql_match == ruby_match
+
+    Rails.logger.warn(
+      "[ConditionsParity] rule=#{rule.id} event=#{rule.event_name} ruby=#{ruby_match} " \
+      "sql=#{sql_match} conditions=#{rule.conditions.inspect}"
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[ConditionsParity] rule=#{rule&.id} event=#{rule&.event_name} sql_error=#{e.class}: #{e.message}")
+  end
+
   def contact_attribute_match?(contact, attribute_key, filter_operator, values)
     case attribute_key
     when 'labels'
@@ -438,6 +458,7 @@ class AutomationRuleListener < BaseListener
     recorder.add_step('Event received', data: { event_name: rule.event_name, changed_attributes: changed_attributes })
 
     conditions_match = evaluate_contact_conditions(rule, contact, changed_attributes)
+    shadow_compare_contact_conditions(rule, contact, changed_attributes, conditions_match)
     recorder.add_step(
       'Conditions evaluated',
       level: conditions_match ? 'success' : 'info',
