@@ -406,27 +406,52 @@ class Conversation < ApplicationRecord
   end
 
   def assign_to_default_pipeline
-    default_pipeline = Pipeline.default.first
-    unless default_pipeline
-      Rails.logger.info "[Pipeline] No default pipeline found, skipping auto-assignment for conversation #{id}"
+    target_pipeline, target_stage = resolve_target_pipeline
+
+    unless target_pipeline
+      Rails.logger.info "[Pipeline] No pipeline found for conversation #{id}, skipping auto-assignment"
       return
     end
 
-    # Verifica se já está no pipeline (prevenção de duplicatas)
-    if default_pipeline.pipeline_items.exists?(conversation: self)
-      Rails.logger.info "[Pipeline] Conversation #{id} already in default pipeline #{default_pipeline.id}, skipping"
+    if target_pipeline.pipeline_items.exists?(conversation: self)
+      Rails.logger.info "[Pipeline] Conversation #{id} already in pipeline #{target_pipeline.id}, skipping"
       return
     end
 
-    result = default_pipeline.add_conversation(self, nil, nil)
+    service = Pipelines::ConversationService.new(pipeline: target_pipeline)
+    result = service.add_conversation(self, stage: target_stage)
     if result
-      Rails.logger.info "[Pipeline] Conversation #{id} auto-assigned to default pipeline #{default_pipeline.name}"
+      Rails.logger.info "[Pipeline] Conversation #{id} auto-assigned to pipeline '#{target_pipeline.name}'" \
+                        "#{target_stage ? " / stage '#{target_stage.name}'" : ''}"
     else
-      Rails.logger.warn "[Pipeline] Failed to auto-assign conversation #{id} to default pipeline #{default_pipeline.name} (no stages?)"
+      Rails.logger.warn "[Pipeline] Failed to auto-assign conversation #{id} to pipeline #{target_pipeline.name} (no stages?)"
     end
   rescue StandardError => e
-    Rails.logger.error "[Pipeline] Failed to add conversation #{id} to default pipeline: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
-    # Não falha a criação da conversation se pipeline assignment falhar
+    Rails.logger.error "[Pipeline] Failed to add conversation #{id} to pipeline: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+  end
+
+  def resolve_target_pipeline
+    # Prioridade 1: pipeline ativo do contato (mais recente, apenas leads — conversation_id: nil)
+    if contact_id.present?
+      contact_item = PipelineItem
+                       .active
+                       .where(contact_id: contact_id, conversation_id: nil)
+                       .order(created_at: :desc)
+                       .includes(:pipeline, :pipeline_stage)
+                       .first
+
+      if contact_item
+        Rails.logger.info "[Pipeline] Contact #{contact_id} already in pipeline '#{contact_item.pipeline.name}'" \
+                          " / stage '#{contact_item.pipeline_stage.name}' — using it for conversation #{id}"
+        return [contact_item.pipeline, contact_item.pipeline_stage]
+      end
+    end
+
+    # Fallback: pipeline padrão
+    default_pipeline = Pipeline.default.first
+    return [nil, nil] unless default_pipeline
+
+    [default_pipeline, nil]
   end
 
   # Note: Database trigger removed - display_id is now generated in Ruby via before_create callback
