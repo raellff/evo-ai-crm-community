@@ -273,7 +273,8 @@ module Whatsapp
 
         # Atualizar a lista de templates após criar um novo
         sync_templates
-        whatsapp_channel.message_templates.find { |template| template['name'] == template_data['name'] }
+        whatsapp_channel.message_templates.reload.find_by(name: template_data['name']) ||
+          whatsapp_channel.message_templates.order(created_at: :desc).first
       end
 
       def update_template(template_id, template_data)
