@@ -28,11 +28,13 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                           pipeline_stages: [],
                           pipeline_items: [
                             :pipeline_stage,
-                            conversation: [
-                              :contact,
+                            :stage_movements,
+                            { contact: [:taggings, { avatar_attachment: :blob }] },
+                            { conversation: [
                               :assignee,
                               :inbox,
-                            ]
+                              { contact: [:taggings, { avatar_attachment: :blob }] }
+                            ] }
                           ]
                         )
                         .order(:name)
