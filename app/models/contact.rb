@@ -2,26 +2,28 @@
 #
 # Table name: contacts
 #
-#  id                    :uuid             not null, primary key
-#  additional_attributes :jsonb
-#  blocked               :boolean          default(FALSE), not null
-#  contact_type          :integer          default("visitor")
-#  country_code          :string           default("")
-#  custom_attributes     :jsonb
-#  email                 :string
-#  identifier            :string
-#  industry              :string
-#  last_activity_at      :datetime
-#  last_name             :string           default("")
-#  location              :string           default("")
-#  middle_name           :string           default("")
-#  name                  :string           default("")
-#  phone_number          :string
-#  type                  :enum             default("person"), not null
-#  website               :string
-#  created_at            :datetime         not null
-#  updated_at            :datetime         not null
-#  tax_id                :string(14)
+#  id                       :uuid             not null, primary key
+#  additional_attributes    :jsonb
+#  blocked                  :boolean          default(FALSE), not null
+#  contact_type             :integer          default("visitor")
+#  country_code             :string           default("")
+#  custom_attributes        :jsonb
+#  email                    :string
+#  email_suppressed         :boolean          default(FALSE), not null
+#  email_suppression_reason :string
+#  identifier               :string
+#  industry                 :string
+#  last_activity_at         :datetime
+#  last_name                :string           default("")
+#  location                 :string           default("")
+#  middle_name              :string           default("")
+#  name                     :string           default("")
+#  phone_number             :string
+#  type                     :enum             default("person"), not null
+#  website                  :string
+#  created_at               :datetime         not null
+#  updated_at               :datetime         not null
+#  tax_id                   :string(14)
 #
 # Indexes
 #

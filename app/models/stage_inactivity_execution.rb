@@ -8,23 +8,22 @@
 #  base              :string
 #  executed_at       :datetime         not null
 #  message_sent      :text
-#  rule_id           :string           not null
 #  created_at        :datetime         not null
 #  updated_at        :datetime         not null
 #  pipeline_item_id  :uuid             not null
 #  pipeline_stage_id :uuid             not null
+#  rule_id           :string           not null
 #
 # Indexes
 #
-#  index_stage_inactivity_executions_on_executed_at        (executed_at)
-#  index_stage_inactivity_executions_on_pipeline_item_id   (pipeline_item_id)
-#  index_stage_inactivity_on_item_and_rule                 (pipeline_item_id,rule_id) UNIQUE
+#  index_stage_inactivity_executions_on_executed_at       (executed_at)
+#  index_stage_inactivity_executions_on_pipeline_item_id  (pipeline_item_id)
+#  index_stage_inactivity_on_item_and_rule                (pipeline_item_id,rule_id) UNIQUE
 #
-# Tracks which inactivity rule already fired for a given pipeline_item, so the
-# minute-by-minute scheduler does not re-send. The UNIQUE (pipeline_item_id,
-# rule_id) index is the idempotency guard: the service reserves the row with an
-# INSERT *before* sending, so a Sidekiq retry or two concurrent schedulers race
-# on the INSERT — the loser hits RecordNotUnique and skips sending entirely.
+# Foreign Keys
+#
+#  fk_rails_...  (pipeline_item_id => pipeline_items.id) ON DELETE => cascade
+#
 class StageInactivityExecution < ApplicationRecord
   belongs_to :pipeline_item
 
