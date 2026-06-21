@@ -220,6 +220,17 @@ class Rack::Attack
     end
   end
 
+  ## Prevent abuse of the ERP webhook receiver (EVO-1735 S3.0)
+  ## Each request can ingest up to 500 products via Products::BulkImporter
+  ## (same ceiling as /api/v1/products/bulk). The discriminator is the
+  ## provider segment of the path, so the 11th request from a given
+  ## provider in the window trips 429 regardless of signature/payload —
+  ## which is what AC8 requires. A compromised secret still throttles.
+  throttle('api/v1/webhooks/erp', limit: ENV.fetch('RATE_LIMIT_ERP_WEBHOOK', '10').to_i, period: 1.minute) do |req|
+    match_data = %r{\A/api/v1/webhooks/erp/([^/]+)\z}.match(req.path_without_extentions)
+    "erp_webhook:#{match_data[1]}" if match_data && req.post?
+  end
+
   ## ----------------------------------------------- ##
 end
 
