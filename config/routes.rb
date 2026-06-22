@@ -263,6 +263,14 @@ Rails.application.routes.draw do
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
       end
 
+      # Lead-capture form builder admin CRUD (B14.01).
+      resources :crm_forms, only: [:index, :create, :show, :update, :destroy], controller: 'crm_forms' do
+        get :leads, on: :member
+      end
+
+      # Chat-page builder admin CRUD (B14.08).
+      resources :chat_pages, only: [:index, :create, :show, :update, :destroy], controller: 'chat_pages'
+
       # ERP webhook ingress (EVO-1735 S3.0) — extensible adapter registry,
       # ships with `:noop` only. Adapter for a concrete ERP lands in S3.1
       # when a customer pilot is contracted.
@@ -718,6 +726,13 @@ Rails.application.routes.draw do
         end
 
         resources :leads, only: [:create]
+
+        # Anonymous lead-capture forms (B14.01): resolved by public slug, no API key.
+        get  'forms/:slug',             to: 'forms#show'
+        post 'forms/:slug/submissions', to: 'forms#create'
+
+        # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
+        get 'chat_pages/:slug', to: 'chat_pages#show'
 
         resources :csat_survey, only: [:show, :update]
       end
