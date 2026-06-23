@@ -83,17 +83,28 @@ class EvoAuthService
     nil
   end
 
+  # Authorization checks below are SERVER-TO-SERVER: they ask "does user X hold
+  # permission K?" — they must NOT ride the caller's (rotating) bearer. Forwarding
+  # the user bearer means a token rotated/revoked mid-request makes auth raise on
+  # the sub-call (returns 500), the callers below rescue it as a denial, and the
+  # user gets a SPURIOUS 403 on a permission they actually hold (works again after
+  # re-login). The service token is stable AND sets Current.service_authenticated
+  # in auth, which bypasses the per-caller `users.read` gate on check_permission.
+  def service_auth_headers
+    token = ENV['EVOAI_CRM_API_TOKEN'].presence
+    token ? { 'X-Service-Token' => token } : {}
+  end
+
   # Check account-scoped permission for user
   def check_account_permission(user_id, _identifier = nil, permission_key)
     # Use new standard: /api/v1/users/:id/check_permission with account-id header
-    headers = {}
     response = instrument_remote_call(
       'check_account_permission',
       user_id: user_id
     ) do
       post_request("/api/v1/users/#{user_id}/check_permission",
                    { permission_key: permission_key },
-                   headers)
+                   service_auth_headers)
     end
 
     data = response['data'] || {}
@@ -112,7 +123,8 @@ class EvoAuthService
   def check_user_permission(user_id, permission_key)
     response = instrument_remote_call('check_user_permission', user_id: user_id) do
       post_request("/api/v1/users/#{user_id}/check_permission",
-                   { permission_key: permission_key })
+                   { permission_key: permission_key },
+                   service_auth_headers)
     end
 
     data = response['data'] || {}
@@ -165,7 +177,17 @@ class EvoAuthService
       request[key] = value
     end
 
-    unless headers.key?('Authorization') || headers.key?('api_access_token')
+    # An explicit auth header — including a service token (X-Service-Token /
+    # X-Internal-API-Token) — means the caller already chose its credential, so we
+    # must NOT co-inject the request's user bearer on top of it. Auth checks the
+    # Authorization header FIRST, so a co-injected (possibly rotated/revoked) bearer
+    # would shadow the service token and the call would fail-closed (see
+    # check_user_permission). Treat any of these keys as "auth already provided".
+    auth_already_provided = headers.key?('Authorization') ||
+                            headers.key?('api_access_token') ||
+                            headers.key?('X-Service-Token') ||
+                            headers.key?('X-Internal-API-Token')
+    unless auth_already_provided
       request['Authorization'] = "Bearer #{Current.bearer_token}" if Current.bearer_token.present?
       request['api_access_token'] = Current.api_access_token.to_s if Current.api_access_token.present?
     end
