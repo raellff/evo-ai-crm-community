@@ -407,7 +407,7 @@ class Conversation < ApplicationRecord
   end
 
   def assign_to_default_pipeline
-    target_pipeline, target_stage = resolve_target_pipeline
+    target_pipeline, target_stage, lead_item = resolve_target_pipeline
 
     unless target_pipeline
       Rails.logger.info "[Pipeline] No pipeline found for conversation #{id}, skipping auto-assignment"
@@ -419,6 +419,12 @@ class Conversation < ApplicationRecord
       return
     end
 
+    # FUSÃO: já existe um card de lead/compra do contato (conversation_id: nil) neste funil →
+    # PROMOVE esse card (passa a apontar p/ esta conversa) em vez de criar um 2º. Um card por
+    # contato; as labels/automações da conversa passam a agir no card existente (cura o "estágio
+    # preso"). Se a promoção não rolar (sem lead-card OU race), CAI no fluxo normal abaixo.
+    return if promote_lead_card(lead_item, target_pipeline)
+
     service = Pipelines::ConversationService.new(pipeline: target_pipeline)
     result = service.add_conversation(self, stage: target_stage)
     if result
@@ -429,6 +435,30 @@ class Conversation < ApplicationRecord
     end
   rescue StandardError => e
     Rails.logger.error "[Pipeline] Failed to add conversation #{id} to pipeline: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+  end
+
+  # Promove um card de lead/compra existente do contato (conversation_id: nil) para apontar p/
+  # ESTA conversa. CRÍTICO: o PipelineItem exige OU contact_id OU conversation_id (nunca os dois)
+  # → seta conversation_id E LIMPA contact_id no MESMO update (item vira conversation-axis).
+  # Retorna true SÓ se promoveu de fato. Numa race (índice único conversation_id por pipeline) o
+  # RecordNotUnique significa "outra conversa já promoveu" → também resolvido (true). Qualquer
+  # OUTRA falha NÃO é engolida: retorna false → o chamador cai no add_conversation normal (nunca
+  # deixa a conversa sem card — foi o bug do fix anterior).
+  def promote_lead_card(lead_item, _target_pipeline)
+    return false unless lead_item
+
+    lead_item.update!(conversation_id: id, contact_id: nil)
+    Rails.logger.info "[Pipeline] Conversation #{id} promoted onto existing lead card #{lead_item.id}"
+    true
+  rescue ActiveRecord::RecordNotUnique
+    # Race: outra conversa já promoveu este lead-card (índice único conversation_id). Resolvido.
+    Rails.logger.info "[Pipeline] Lead card already promoted for conversation #{id} (race) — ok"
+    true
+  rescue StandardError => e
+    # NUNCA deixar a conversa sem card: qualquer outra falha na promoção → false → o chamador
+    # cai no add_conversation normal (cria o card). Um dup-card é aceitável; zero-card NÃO é.
+    Rails.logger.warn "[Pipeline] Lead card promotion failed for conversation #{id} (#{e.class}: #{e.message}) — fallback to add_conversation"
+    false
   end
 
   def resolve_target_pipeline
@@ -443,16 +473,17 @@ class Conversation < ApplicationRecord
 
       if contact_item
         Rails.logger.info "[Pipeline] Contact #{contact_id} already in pipeline '#{contact_item.pipeline.name}'" \
-                          " / stage '#{contact_item.pipeline_stage.name}' — using it for conversation #{id}"
-        return [contact_item.pipeline, contact_item.pipeline_stage]
+                          " / stage '#{contact_item.pipeline_stage.name}' — promoting it for conversation #{id}"
+        # 3º valor = o PRÓPRIO card de lead → assign_to_default_pipeline o PROMOVE (em vez de criar 2º).
+        return [contact_item.pipeline, contact_item.pipeline_stage, contact_item]
       end
     end
 
-    # Fallback: pipeline padrão
+    # Fallback: pipeline padrão (sem lead-card → 3º valor nil → fluxo normal cria o card).
     default_pipeline = Pipeline.default.first
-    return [nil, nil] unless default_pipeline
+    return [nil, nil, nil] unless default_pipeline
 
-    [default_pipeline, nil]
+    [default_pipeline, nil, nil]
   end
 
   # Note: Database trigger removed - display_id is now generated in Ruby via before_create callback

@@ -190,11 +190,13 @@ RSpec.describe Conversation, type: :model do
     let(:persisted_conversation) { create_conversation }
 
     it 'retorna pipeline e stage do lead ativo do contato' do
+      # ORDEM: força a conversa (callback roda) e LIMPA o que ela criou ANTES de criar o lead —
+      # senão o callback promoveria/consumiria o lead recém-criado (semântica de fusão nova).
+      conv = persisted_conversation
+      PipelineItem.where(conversation: conv).destroy_all
       PipelineItem.create!(pipeline: vendas_pipeline, pipeline_stage: vendas_stage, contact: contact)
-      # Remove o item criado pelo callback para testar resolve_target_pipeline isolado
-      PipelineItem.where(conversation: persisted_conversation).destroy_all
 
-      pipeline, stage = persisted_conversation.send(:resolve_target_pipeline)
+      pipeline, stage = conv.send(:resolve_target_pipeline)
       expect(pipeline).to eq(vendas_pipeline)
       expect(stage).to eq(vendas_stage)
     end
@@ -214,6 +216,49 @@ RSpec.describe Conversation, type: :model do
       pipeline, stage = persisted_conversation.send(:resolve_target_pipeline)
       expect(pipeline).to be_nil
       expect(stage).to be_nil
+    end
+
+    it 'retorna o lead-card do contato como 3º valor (para promoção)' do
+      conv = persisted_conversation
+      PipelineItem.where(conversation: conv).destroy_all
+      lead = PipelineItem.create!(pipeline: vendas_pipeline, pipeline_stage: vendas_stage, contact: contact)
+
+      _pipeline, _stage, lead_item = conv.send(:resolve_target_pipeline)
+      expect(lead_item).to eq(lead)
+    end
+  end
+
+  describe '#assign_to_default_pipeline fusão (promoção do lead-card)' do
+    before { vendas_stage }
+
+    # Conversa persistida; LIMPAMOS o que o callback after_create_commit já criou para montar o
+    # estado de teste do zero (lead-card por-contato + chamada manual de assign).
+    let(:persisted_conversation) { create_conversation }
+
+    it 'PROMOVE o lead-card (seta conversation_id, LIMPA contact_id) sem criar 2º card' do
+      conv = persisted_conversation
+      PipelineItem.where(conversation: conv).destroy_all # zera o que o callback fez
+      lead = PipelineItem.create!(pipeline: vendas_pipeline, pipeline_stage: vendas_stage, contact: contact)
+
+      expect do
+        conv.send(:assign_to_default_pipeline)
+      end.not_to change(PipelineItem, :count) # promove o lead existente, não cria outro
+
+      lead.reload
+      expect(lead.conversation_id).to eq(conv.id)
+      expect(lead.contact_id).to be_nil # invariante OU-contact-OU-conversation
+      expect(lead.contact).to eq(contact) # ainda resolve o contato via conversa (fallback)
+      expect(PipelineItem.active.where(conversation: conv).count).to eq(1)
+    end
+
+    it 'sem lead-card, CAI no fluxo normal e cria o card da conversa (NUNCA fica sem card)' do
+      default_stage
+      conv = persisted_conversation
+      PipelineItem.where(conversation: conv).destroy_all # sem nenhum card do contato
+
+      expect do
+        conv.send(:assign_to_default_pipeline)
+      end.to change { PipelineItem.where(conversation: conv).count }.from(0).to(1)
     end
   end
 end

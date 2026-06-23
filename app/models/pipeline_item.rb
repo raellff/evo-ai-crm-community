@@ -39,6 +39,14 @@ class PipelineItem < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :assigned_by, class_name: 'User', optional: true
 
+  # Um item é OU por-contato (lead, conversation_id nil) OU por-conversa. Quando uma conversa
+  # PROMOVE um lead-card (Conversation#promote_lead_card seta conversation_id e LIMPA contact_id),
+  # o contato passa a vir da conversa. Este accessor faz o card-de-conversa ainda responder
+  # `.contact` (readers como StageInactivityTargetResolver dependem disso).
+  def contact
+    super || conversation&.contact
+  end
+
   has_many :stage_movements, dependent: :destroy
   has_many :tasks, class_name: 'PipelineTask', dependent: :destroy
   has_many :pipeline_item_products, dependent: :destroy
