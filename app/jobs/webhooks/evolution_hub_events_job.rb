@@ -22,88 +22,120 @@ module Webhooks
   class EvolutionHubEventsJob < ApplicationJob
     queue_as :default
 
-  DEDUP_TTL_SECONDS = 300
+    DEDUP_TTL_SECONDS = 300
 
-  HUB_EVENT_TYPES = %w[
-    channel_connected
-    channel_disconnected
-    channel_auto_imported
-    webhook_delivered
-    webhook_failed
-    proxy_api_used
-  ].freeze
+    HUB_EVENT_TYPES = %w[
+      channel_connected
+      channel_disconnected
+      channel_auto_imported
+      webhook_delivered
+      webhook_failed
+      proxy_api_used
+    ].freeze
 
-  def perform(raw_body, delivery_id)
-    return unless acquire_dedup_lock(delivery_id)
+    def perform(raw_body, delivery_id)
+      return unless acquire_dedup_lock(delivery_id)
 
-    payload = JSON.parse(raw_body)
+      payload = JSON.parse(raw_body)
 
-    if hub_lifecycle_event?(payload)
-      process_hub_lifecycle(payload)
-    elsif forwarded_meta_event?(payload)
-      forward_to_meta_pipeline(raw_body, payload)
-    else
-      Rails.logger.warn("EvolutionHub: unrecognised payload shape (event_type=#{payload['event_type'].inspect} object=#{payload['object'].inspect})")
+      if hub_lifecycle_event?(payload)
+        process_hub_lifecycle(payload)
+      elsif forwarded_meta_event?(payload)
+        forward_to_meta_pipeline(raw_body, payload)
+      else
+        Rails.logger.warn('EvolutionHub: unrecognised payload shape ' \
+                          "(event_type=#{payload['event_type'].inspect} object=#{payload['object'].inspect})")
+      end
+    rescue JSON::ParserError => e
+      Rails.logger.error("EvolutionHub: failed to parse webhook body — #{e.message}")
     end
-  rescue JSON::ParserError => e
-    Rails.logger.error("EvolutionHub: failed to parse webhook body — #{e.message}")
-  end
 
-  private
+    private
 
-  def acquire_dedup_lock(delivery_id)
-    return true if delivery_id.blank?
+    def acquire_dedup_lock(delivery_id)
+      return true if delivery_id.blank?
 
-    key = "evolution_hub:delivery:#{delivery_id}"
-    # SET NX EX 300 — only returns truthy when the key did NOT already exist.
-    Redis::Alfred.setex(key, '1', DEDUP_TTL_SECONDS) ? true : false
-  rescue StandardError => e
-    Rails.logger.warn("EvolutionHub: dedup lock unavailable (#{e.class}: #{e.message}); processing anyway")
-    true
-  end
-
-  def hub_lifecycle_event?(payload)
-    # Hub envia 'event' (atual) — 'event_type' é forward-compat caso o Hub
-    # mude o nome do campo. Aceita ambos pra não quebrar com upgrade.
-    type = payload['event'] || payload['event_type']
-    HUB_EVENT_TYPES.include?(type)
-  end
-
-  def forwarded_meta_event?(payload)
-    %w[whatsapp_business_account page instagram].include?(payload['object'])
-  end
-
-  def process_hub_lifecycle(payload)
-    type = payload['event'] || payload['event_type']
-    case type
-    when 'channel_connected'      then EvolutionHub::ChannelConnectedHandler.new(payload).perform
-    when 'channel_disconnected'   then EvolutionHub::ChannelDisconnectedHandler.new(payload).perform
-    when 'channel_auto_imported'  then EvolutionHub::ChannelAutoImportedHandler.new(payload).perform
-    else
-      # webhook_delivered/failed/proxy_api_used are informational. Log and move on.
-      Rails.logger.info("EvolutionHub: lifecycle event #{type} for channel=#{payload['external_id'] || payload.dig('channel', 'external_id')}")
+      key = "evolution_hub:delivery:#{delivery_id}"
+      # SET NX EX 300 — only returns truthy when the key did NOT already exist.
+      Redis::Alfred.setex(key, '1', DEDUP_TTL_SECONDS) ? true : false
+    rescue StandardError => e
+      Rails.logger.warn("EvolutionHub: dedup lock unavailable (#{e.class}: #{e.message}); processing anyway")
+      true
     end
-  end
 
-  def forward_to_meta_pipeline(raw_body, payload)
-    # The per-platform jobs (Whatsapp/Facebook/InstagramEventsJob) read params
-    # with symbol keys (`params[:object]`, `params[:instance]`, etc.). The
-    # native Webhooks::WhatsappController uses `params.to_unsafe_hash`, which
-    # gives an ActionController::Parameters-backed hash with indifferent
-    # access — symbol *and* string keys both work. Our JSON.parse produces a
-    # plain string-keyed Hash, so we must wrap it before enqueueing or every
-    # `params[:object]` lookup downstream returns nil and the job logs
-    # "no channel found for params {}".
-    forward_payload = payload.with_indifferent_access
-
-    case payload['object']
-    when 'whatsapp_business_account'
-      Webhooks::WhatsappEventsJob.perform_later(forward_payload) if defined?(Webhooks::WhatsappEventsJob)
-    when 'page'
-      Webhooks::FacebookEventsJob.perform_later(forward_payload)
-    when 'instagram'
-      Webhooks::InstagramEventsJob.perform_later(forward_payload) if defined?(Webhooks::InstagramEventsJob)
+    def hub_lifecycle_event?(payload)
+      # Hub envia 'event' (atual) — 'event_type' é forward-compat caso o Hub
+      # mude o nome do campo. Aceita ambos pra não quebrar com upgrade.
+      type = payload['event'] || payload['event_type']
+      HUB_EVENT_TYPES.include?(type)
     end
-  end
+
+    def forwarded_meta_event?(payload)
+      %w[whatsapp_business_account page instagram].include?(payload['object'])
+    end
+
+    def process_hub_lifecycle(payload)
+      type = payload['event'] || payload['event_type']
+      case type
+      when 'channel_connected'      then EvolutionHub::ChannelConnectedHandler.new(payload).perform
+      when 'channel_disconnected'   then EvolutionHub::ChannelDisconnectedHandler.new(payload).perform
+      when 'channel_auto_imported'  then EvolutionHub::ChannelAutoImportedHandler.new(payload).perform
+      else
+        # webhook_delivered/failed/proxy_api_used are informational. Log and move on.
+        Rails.logger.info("EvolutionHub: lifecycle event #{type} for channel=#{payload['external_id'] || payload.dig('channel', 'external_id')}")
+      end
+    end
+
+    def forward_to_meta_pipeline(_raw_body, payload)
+      # The per-platform jobs (Whatsapp/Facebook/InstagramEventsJob) read params
+      # with symbol keys (`params[:object]`, `params[:instance]`, etc.). The
+      # native Webhooks::WhatsappController uses `params.to_unsafe_hash`, which
+      # gives an ActionController::Parameters-backed hash with indifferent
+      # access — symbol *and* string keys both work. Our JSON.parse produces a
+      # plain string-keyed Hash, so we must wrap it before enqueueing or every
+      # `params[:object]` lookup downstream returns nil and the job logs
+      # "no channel found for params {}".
+      forward_payload = payload.with_indifferent_access
+
+      case payload['object']
+      when 'whatsapp_business_account'
+        # WhatsappEventsJob lê o payload INTEIRO (params[:object]/[:entry]) — passa como está.
+        Webhooks::WhatsappEventsJob.perform_later(forward_payload) if defined?(Webhooks::WhatsappEventsJob)
+      when 'page'
+        forward_facebook(forward_payload)
+      when 'instagram'
+        forward_instagram(forward_payload)
+      end
+    end
+
+    # CONTRATO NATIVO (não passar o payload inteiro — cada job espera um shape específico):
+    #
+    # InstagramEventsJob: o controller nativo (webhooks/instagram#events) chama
+    #   `perform_later(params.to_unsafe_hash[:entry])` — o ARRAY de entries, NÃO o objeto
+    #   {entry:[...], object:...}. O job faz `entries.each`/`entries.first.dig(:id)`. Passar o
+    #   objeto inteiro fazia `Hash#each` iterar as CHAVES → TypeError "Symbol into Integer" → a DM
+    #   nunca virava conversa. Desempacotamos `[:entry]` p/ honrar o contrato nativo.
+    def forward_instagram(forward_payload)
+      return unless defined?(Webhooks::InstagramEventsJob)
+
+      entries = forward_payload[:entry]
+      return if entries.blank?
+
+      Webhooks::InstagramEventsJob.perform_later(entries)
+    end
+
+    # FacebookEventsJob → Integrations::Facebook::MessageParser espera uma STRING JSON de UM
+    # objeto `messaging` na RAIZ (`@response = JSON.parse(json); @response['messaging']`) — shape que
+    # a gem facebook-messenger entrega no fluxo nativo (1 evento por chamada). O payload do EvoHub é
+    # {entry:[{messaging:[...]}]}, com `messaging` ANINHADO. Sem desempacotar, o parser busca
+    # 'messaging' na raiz → nil → a DM nunca vira conversa (falha silenciosa). Iteramos cada
+    # entry[].messaging[] e despachamos UMA mensagem por job, como string JSON {messaging:{...}}.
+    def forward_facebook(forward_payload)
+      Array(forward_payload[:entry]).each do |entry|
+        Array(entry[:messaging]).each do |messaging|
+          Webhooks::FacebookEventsJob.perform_later({ messaging: messaging }.to_json)
+        end
+      end
+    end
   end
 end
