@@ -8,7 +8,15 @@ class AgentBots::HttpRequestService
 
   def initialize(agent_bot, payload)
     @agent_bot = agent_bot
-    @payload = payload
+    # `with_indifferent_access` (CB): o payload chega ora com SYMBOL keys (webhook_data
+    # nativo), ora com STRING keys (quando passou por serialização JSON no caminho do
+    # evento/job). Os helpers abaixo usam `@payload.dig(:conversation, :id)` (symbol);
+    # com string keys o dig FALHAVA → find_conversation_from_payload não achava a
+    # conversa → extract_context_id caía no fallback SecureRandom.uuid → contextId
+    # ALEATÓRIO a cada mensagem → session_id novo no processor → o agente "esquecia" o
+    # histórico e repetia a 1ª resposta ("preso na primeira mensagem"). Indifferent
+    # access faz symbol E string keys funcionarem → contextId estável por conversa.
+    @payload = payload.respond_to?(:with_indifferent_access) ? payload.with_indifferent_access : payload
   end
 
   def perform
