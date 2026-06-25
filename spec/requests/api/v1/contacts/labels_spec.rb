@@ -1,0 +1,101 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+# EVO-1928: `POST /api/v1/contacts/:contact_id/labels` must persist a tagging
+# whenever the caller expresses a label by NAME, including the shapes used by
+# the journeys/evo-flow add-label node (singular `labelId` key and/or a bare
+# scalar value). It previously replied `200` with no tagging persisted — a
+# false-success — for every shape other than a flat `labels` array.
+RSpec.describe 'Api::V1::Contacts::Labels', type: :request do
+  let(:contact) { Contact.create!(name: "Repro #{SecureRandom.hex(3)}", type: 'person') }
+  let(:service_token) { 'spec-service-token' }
+  let(:headers) { { 'X-Service-Token' => service_token } }
+
+  before { ENV['EVOAI_CRM_API_TOKEN'] = service_token }
+
+  after do
+    ENV.delete('EVOAI_CRM_API_TOKEN')
+    Current.reset
+  end
+
+  def json_response
+    JSON.parse(response.body)
+  end
+
+  def taggings_for(record)
+    ActsAsTaggableOn::Tagging.where(taggable: record)
+  end
+
+  describe 'POST /api/v1/contacts/:contact_id/labels' do
+    it 'persists a tagging when labels are sent as a titles array' do
+      post "/api/v1/contacts/#{contact.id}/labels",
+           params: { labels: ['vip'] }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['payload']).to contain_exactly('vip')
+      expect(taggings_for(contact).count).to eq(1)
+      expect(contact.reload.label_list).to contain_exactly('vip')
+    end
+
+    # Regression for EVO-1928: the add-label node posts the label by NAME under
+    # the singular `labelId` key. The previous `params.permit(labels: [])` made
+    # that resolve to nil, so no tagging was persisted.
+    it 'persists a tagging when the label name arrives under the singular labelId key' do
+      post "/api/v1/contacts/#{contact.id}/labels",
+           params: { labelId: 'vip' }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['payload']).to contain_exactly('vip')
+      expect(taggings_for(contact).count).to eq(1)
+      expect(contact.reload.label_list).to contain_exactly('vip')
+    end
+
+    it 'persists a tagging when the label name arrives as a bare scalar under labels' do
+      post "/api/v1/contacts/#{contact.id}/labels",
+           params: { labels: 'support' }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['payload']).to contain_exactly('support')
+      expect(taggings_for(contact).count).to eq(1)
+    end
+
+    it 'translates a UUID that matches a Label into its title and persists it' do
+      label = Label.create!(title: 'Priority') # stored downcased as 'priority'
+
+      post "/api/v1/contacts/#{contact.id}/labels",
+           params: { labels: [label.id] }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['payload']).to contain_exactly('priority')
+      expect(taggings_for(contact).count).to eq(1)
+    end
+
+    it 'removes a label by re-posting the desired set without it' do
+      post "/api/v1/contacts/#{contact.id}/labels",
+           params: { labels: %w[vip support] }, headers: headers, as: :json
+      expect(taggings_for(contact).count).to eq(2)
+
+      # The contact labels endpoint replaces the full set; the node drops a
+      # label by posting the remaining desired set.
+      post "/api/v1/contacts/#{contact.id}/labels",
+           params: { labels: ['support'] }, headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['payload']).to contain_exactly('support')
+      expect(taggings_for(contact).count).to eq(1)
+      expect(contact.reload.label_list).to contain_exactly('support')
+    end
+
+    it 'reflects the persisted label on the subsequent index read' do
+      post "/api/v1/contacts/#{contact.id}/labels",
+           params: { labelId: 'support' }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+
+      get "/api/v1/contacts/#{contact.id}/labels", headers: headers, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(json_response['payload']).to contain_exactly('support')
+    end
+  end
+end
