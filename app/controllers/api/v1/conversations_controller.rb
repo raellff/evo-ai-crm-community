@@ -200,8 +200,8 @@ class Api::V1::ConversationsController < Api::V1::BaseController
   rescue StandardError => e
     Rails.logger.error "Conversation creation failed: #{e.message}"
     error_response(
-      code: ApiErrorCodes::VALIDATION_ERROR,
-      message: 'Conversation creation failed',
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Conversation creation failed',
       details: e.message,
       status: :unprocessable_entity
     )
