@@ -17,6 +17,27 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     end
   end
 
+  # Propagates an agent's message deletion to WhatsApp (delete-for-everyone).
+  # Returns true when the provider acknowledged the revoke.
+  def delete_message(message)
+    return false if api_base_path.blank? || instance_name.blank?
+    return false if message.source_id.blank?
+
+    remote_jid = remote_jid_for(message)
+    return false if remote_jid.blank?
+
+    response = HTTParty.delete(
+      "#{api_base_path}/chat/deleteMessageForEveryone/#{instance_name}",
+      headers: api_headers,
+      body: { id: message.source_id, remoteJid: remote_jid, fromMe: message.outgoing? }.to_json,
+      timeout: 10
+    )
+    return true if response.success?
+
+    Rails.logger.warn("Evolution API: deleteMessageForEveryone failed (#{response.code}) for source_id=#{message.source_id}")
+    false
+  end
+
   def send_template(phone_number, template_info)
     # Evolution API doesn't support template messages in the same way
     # For now, we'll send a regular text message
@@ -297,6 +318,14 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     whatsapp_channel.provider_config['instance_name']
   end
 
+  def remote_jid_for(message)
+    source_id = message.conversation&.contact_inbox&.source_id.to_s
+    return nil if source_id.blank?
+    return source_id if source_id.include?('@')
+
+    "#{source_id.delete('+')}@s.whatsapp.net"
+  end
+
   def send_interactive_message(phone_number, message)
     clean_number = phone_number.delete('+')
     items = filter_valid_items(message.content_attributes&.dig('items') || [])
@@ -498,18 +527,11 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     # ACTIVE_STORAGE_URL overrides the host used in DiskService signed URLs so
     # that external containers (Evolution API, Evolution Go) can actually reach
     # the file. Without it, localhost:3000 resolves to the caller's container,
-    # not the CRM Rails app.
-    url_options = Rails.application.routes.default_url_options.dup
-    if ENV['ACTIVE_STORAGE_URL'].present?
-      storage_uri = URI.parse(ENV['ACTIVE_STORAGE_URL'])
-      url_options[:host] = storage_uri.host
-      url_options[:port] = storage_uri.port
-      url_options[:protocol] = storage_uri.scheme
-    end
-    ActiveStorage::Current.url_options = url_options if ActiveStorage::Current.url_options.blank?
-    signed_url = attachment.file.blob.url(expires_in: 15.minutes)
+    # not the CRM Rails app. Scoped per-call so the override does not leak to
+    # other ActiveStorage calls within the same request/job.
+    signed_url = BlobUrlOptions.with_scoped_url_options { attachment.file.blob.url(expires_in: 15.minutes) }
 
-    Rails.logger.info "[Evolution S3] Using signed URL with 15-minute TTL (host: #{url_options[:host]})"
+    Rails.logger.info "[Evolution S3] Using signed URL with 15-minute TTL (host: #{BlobUrlOptions.effective_url_options[:host]})"
     signed_url
   end
 

@@ -231,6 +231,14 @@ class Conversation < ApplicationRecord
     additional_attributes&.dig('is_boosted') == true
   end
 
+  # Helper method to mark status as explicitly set (used by builders and services)
+  # so that determine_conversation_status keeps the provided status instead of
+  # applying the inbox default. Must be public: it is invoked from ConversationBuilder
+  # and other collaborators on the instance.
+  def status_explicitly_set!
+    @status_explicitly_set = true
+  end
+
   private
 
   def ensure_display_id
@@ -281,11 +289,6 @@ class Conversation < ApplicationRecord
     end
 
     Rails.logger.info("[Conversation] determine_conversation_status - Final status: #{status}")
-  end
-
-  # Helper method to mark status as explicitly set (used by builders and services)
-  def status_explicitly_set!
-    @status_explicitly_set = true
   end
 
   def notify_conversation_creation
