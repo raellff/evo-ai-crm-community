@@ -58,6 +58,14 @@ Rails.application.configure do
   # Raise an error on page load if there are pending migrations.
   config.active_record.migration_error = :page_load
 
+  # Do not regenerate db/schema.rb after migrations in development (mirrors
+  # production.rb). The dev stack runs `db:prepare` on every container boot and
+  # the source is bind-mounted, so an automatic dump here rewrites the
+  # version-controlled schema.rb from the container's Postgres — corrupting it
+  # and breaking `db:schema:load` based seeds (EVO-1966). Schema changes must be
+  # dumped intentionally by a developer, not as a runtime side effect.
+  config.active_record.dump_schema_after_migration = false
+
   # Highlight code that triggered database queries in logs.
   config.active_record.verbose_query_logs = true
 
