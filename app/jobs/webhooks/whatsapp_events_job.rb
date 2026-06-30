@@ -6,8 +6,21 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
 
     channel = find_channel(params)
     if channel_is_inactive?(channel)
-      Rails.logger.warn("Inactive WhatsApp channel: #{channel&.phone_number || "unknown - #{params[:phone_number]}"}")
-      return
+      # Fix B (EVO-1967): reconciliacao ativa. Se chega uma mensagem real e a Evolution
+      # reporta a instancia como 'open', a flag de reauthorization esta presa indevidamente
+      # (resto de um close transitorio) -> destrava (reauthorized!) e segue processando.
+      if channel.present? && message_event?(params) && reconcile_channel_state!(channel, params)
+        Rails.logger.warn("[WHATSAPP][RECONCILED] EVO-1967: channel #{channel.phone_number} reauthorized via active reconciliation (Evolution reports 'open')")
+      else
+        # Fix C (EVO-1967): log visivel/alertavel ao descartar (antes era WARN silencioso).
+        Rails.logger.warn(
+          "[WHATSAPP][DROP] Inactive WhatsApp channel - message DISCARDED | " \
+          "phone=#{channel&.phone_number || "unknown(#{params[:phone_number]})"} " \
+          "instance=#{params[:instance]} event=#{params[:event]} " \
+          "reauthorization_required=#{channel&.reauthorization_required?}"
+        )
+        return
+      end
     end
 
     Rails.logger.info "Found WhatsApp channel: #{channel.phone_number} (provider: #{channel.provider})"
@@ -611,6 +624,51 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     return true if channel.reauthorization_required?
 
     false
+  end
+
+  # EVO-1967 Fix B helpers: reconciliacao ativa do estado do canal.
+  # Evita que um canal preso em "reauthorization required" (resto de close transitorio)
+  # descarte mensagens quando a Evolution ja esta 'open' novamente.
+  def message_event?(params)
+    params[:event].to_s == 'messages.upsert' ||
+      params.dig(:entry, 0, :changes, 0, :value, :messages).present?
+  end
+
+  def reconcile_channel_state!(channel, params)
+    return false unless channel.is_a?(Channel::Whatsapp)
+    return false unless channel.provider == 'evolution'
+
+    config = channel.provider_config || {}
+    api_url = config['api_url'].presence
+    instance = (config['instance_name'] || config['instance'] || params[:instance]).presence
+    apikey = (config['instance_token'] || config['admin_token']).presence
+    return false if api_url.blank? || instance.blank? || apikey.blank?
+
+    return false unless evolution_connection_state(api_url, instance, apikey) == 'open'
+
+    channel.reauthorized! # limpa a flag presa no Redis (mesmo metodo do hotfix de campo)
+    true
+  rescue StandardError => e
+    Rails.logger.error "EVO-1967: channel reconciliation failed for channel #{channel&.id}: #{e.message}"
+    false
+  end
+
+  def evolution_connection_state(api_url, instance_name, apikey)
+    uri = URI.parse("#{api_url.chomp('/')}/instance/connectionState/#{instance_name}")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == 'https')
+    http.open_timeout = 5
+    http.read_timeout = 5
+    request = Net::HTTP::Get.new(uri)
+    request['apikey'] = apikey
+    response = http.request(request)
+    return nil unless response.is_a?(Net::HTTPSuccess)
+
+    data = JSON.parse(response.body)
+    data.dig('instance', 'state') || data.dig('instance', 'status') || data['state']
+  rescue StandardError => e
+    Rails.logger.warn "EVO-1967: connectionState check failed (#{instance_name}): #{e.message}"
+    nil
   end
 
   def find_channel_from_whatsapp_business_payload(params)
