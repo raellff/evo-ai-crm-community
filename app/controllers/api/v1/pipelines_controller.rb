@@ -26,17 +26,21 @@ class Api::V1::PipelinesController < Api::V1::BaseController
     # without their items here and skip the heavy contact/conversation/message
     # preload entirely. The full board (stages + items + conversations) is served
     # by #show via GET /pipelines/:id when the user opens a pipeline.
+    # include_services_info: o card de cada funil na LISTA mostra o "Valor Total" (soma dos
+    # serviços dos itens) — antes vinha vazio porque o index não pedia esse cálculo. Pré-carrega
+    # pipeline_items pra a soma de services_total_value não disparar N+1.
     @pipelines = Pipeline.all
                         .accessible_by(Current.user)
                         .active
-                        .includes(pipeline_stages: [])
+                        .includes(pipeline_stages: [], pipeline_items: [])
                         .order(:name)
 
     success_response(
       data: PipelineSerializer.serialize_collection(
         @pipelines,
         include_stages: true,
-        include_items: false
+        include_items: false,
+        include_services_info: true
       ),
       message: 'Pipelines retrieved successfully'
     )
@@ -144,10 +148,15 @@ class Api::V1::PipelinesController < Api::V1::BaseController
 
   def stats
     if params[:id].present?
-      # Stats for a specific pipeline
+      # Stats for a specific pipeline. Inclui VALORES (não só contagem): total do funil +
+      # valor por etapa, do mesmo jeito que a UI mostra. Sem isto, relatórios financeiros
+      # (inclusive do assistente) concluíam "não há valores" apesar dos deals terem serviços.
       @stats = {
         total_items: @pipeline.item_count,
         stage_counts: @pipeline.stage_counts,
+        total_value: @pipeline.total_value,
+        stage_values: @pipeline.stage_values,
+        currency: 'BRL',
       }
     else
       # Stats for all pipelines
@@ -158,6 +167,8 @@ class Api::V1::PipelinesController < Api::V1::BaseController
         active_pipelines: pipelines.where(is_active: true).count,
         inactive_pipelines: pipelines.where(is_active: false).count,
         total_items: pipelines.sum(&:item_count),
+        total_value: pipelines.sum(&:total_value),
+        currency: 'BRL',
       }
     end
 
