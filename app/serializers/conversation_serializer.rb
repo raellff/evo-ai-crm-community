@@ -57,6 +57,9 @@ module ConversationSerializer
       result['unread_count'] = conversation.unread_incoming_messages_count
     end
     result['custom_attributes'] = conversation.custom_attributes || {}
+    # Sinaliza conversa de grupo (contact.type == 'group') para o front filtrar e
+    # reconciliar a aba "Grupos" no realtime sem outra request.
+    result['is_group'] = conversation.contact&.group? || false
 
     # Include contact
     if include_contact && conversation.contact.present?
@@ -77,7 +80,8 @@ module ConversationSerializer
       inbox_data = {
         id: conversation.inbox.id,
         name: conversation.inbox.name,
-        channel_type: conversation.inbox.channel_type
+        channel_type: conversation.inbox.channel_type,
+        agent_bot_active: conversation.inbox.active_bot? == true
       }
 
       # Provider pode não existir em todos os tipos de channel (ex: Channel::Telegram)

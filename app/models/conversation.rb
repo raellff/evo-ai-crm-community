@@ -74,6 +74,16 @@ class Conversation < ApplicationRecord
   scope :assigned, -> { where.not(assignee_id: nil) }
   scope :assigned_to, ->(agent) { where(assignee_id: agent.id) }
   scope :unattended, -> { where(first_reply_created_at: nil).or(where.not(waiting_since: nil)) }
+  # Conversas com mensagens incoming não lidas pelo agente (espelha
+  # unread_incoming_messages_count > 0): sem agent_last_seen_at = qualquer incoming;
+  # senão, incoming com created_at depois do último seen. Usado pelo chip "Não lidas".
+  scope :unread, lambda {
+    where(
+      'EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id ' \
+      "AND messages.message_type = #{Message.message_types[:incoming]} " \
+      'AND (conversations.agent_last_seen_at IS NULL OR messages.created_at > conversations.agent_last_seen_at))'
+    )
+  }
   scope :resolvable_not_waiting, lambda { |auto_resolve_after|
     return none if auto_resolve_after.to_i.zero?
 
@@ -169,6 +179,22 @@ class Conversation < ApplicationRecord
     open!
     create_bot_handoff_activity
     dispatcher_dispatch(CONVERSATION_BOT_HANDOFF)
+  end
+
+  # Reverse human→bot handoff (EVO-1680). Validates that the inbox has an
+  # active AgentBot and the conversation is currently open; transitions to
+  # pending and clears the assignee so the BotProcessorService picks it up on
+  # the next incoming message. Persists the transition as a timeline activity
+  # and emits CONVERSATION_HUMAN_HANDOFF for downstream listeners.
+  def return_to_bot!
+    raise Conversations::InvalidHandoffError, 'inbox has no agent bot connected' unless inbox.active_bot?
+    raise Conversations::InvalidHandoffError, 'conversation must be open' unless open?
+
+    transaction do
+      update!(status: :pending, assignee_id: nil)
+    end
+    create_human_handoff_activity
+    dispatcher_dispatch(CONVERSATION_HUMAN_HANDOFF)
   end
 
   def unread_messages
