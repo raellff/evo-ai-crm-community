@@ -126,6 +126,11 @@ module Api
           result
         end
 
+        # Leading run of bullet chars used by InstallationConfig#masked_value
+        # ("••••••••<last4>"). A payload starting with this is a masked sentinel
+        # echoed back by a frontend, never a real credential.
+        MASK_PREFIX = ("\u2022" * 4).freeze
+
         def save_configs(allowed_keys)
           config_params = params.require(:app_config).permit(*allowed_keys)
           ActiveRecord::Base.transaction do
@@ -133,11 +138,22 @@ module Api
               next unless config_params.key?(key)
 
               value = config_params[key]
-              next if value.nil? && key.end_with?('_SECRET')
+              next if preserve_existing?(key, value)
 
               GlobalConfig.set(key, value)
             end
           end
+        end
+
+        # True when an incoming value must NOT overwrite the stored config:
+        #   - nil on a sensitive key → the admin didn't touch the field (preserve).
+        #   - a masked '••••…' sentinel on a sensitive key → never persist the mask
+        #     back as the real credential (defense for masked-frontend keys).
+        def preserve_existing?(key, value)
+          sensitive = InstallationConfig.sensitive_name?(key)
+          return false unless sensitive
+
+          value.nil? || (value.is_a?(String) && value.start_with?(MASK_PREFIX))
         end
 
         def run_connection_test(config_type)
@@ -182,7 +198,7 @@ module Api
 
           required.select do |key|
             effective =
-              if !incoming.key?(key) || (incoming[key].nil? && key.end_with?('_SECRET'))
+              if !incoming.key?(key) || (incoming[key].nil? && InstallationConfig.sensitive_name?(key))
                 GlobalConfigService.load(key, nil)
               else
                 incoming[key]

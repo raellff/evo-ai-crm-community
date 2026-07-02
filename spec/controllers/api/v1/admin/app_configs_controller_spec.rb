@@ -141,6 +141,33 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
       end
 
 
+      context 'with evolution_hub config type' do
+        before do
+          InstallationConfig.create!(name: 'EVOLUTION_HUB_ENABLED', serialized_value: { 'value' => 'true' })
+          InstallationConfig.create!(name: 'EVOLUTION_HUB_API_KEY', serialized_value: { 'value' => 'hub-bearer-token-1234' })
+        end
+
+        it 'masks EVOLUTION_HUB_API_KEY (non-_SECRET bearer credential)' do
+          get :show, params: { config_type: 'evolution_hub' }, format: :json
+
+          body = JSON.parse(response.body)
+          configs = body['data']['configs']
+          expect(configs['EVOLUTION_HUB_API_KEY']).to start_with('••••••••')
+          expect(configs['EVOLUTION_HUB_API_KEY']).not_to eq('hub-bearer-token-1234')
+          expect(configs['EVOLUTION_HUB_API_KEY']).to end_with('1234')
+        end
+
+        it 'returns plain value for non-secret keys' do
+          get :show, params: { config_type: 'evolution_hub' }, format: :json
+
+          body = JSON.parse(response.body)
+          configs = body['data']['configs']
+          # #show returns the raw stored value; boolean typecast only happens on the
+          # GlobalConfigService.load path, so the stored String comes back verbatim.
+          expect(configs['EVOLUTION_HUB_ENABLED']).to eq('true')
+        end
+      end
+
       context 'with unknown config type' do
         it 'returns 404 with error' do
           get :show, params: { config_type: 'unknown_type' }, format: :json
@@ -223,6 +250,54 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           expect(response).to have_http_status(:ok)
           config = InstallationConfig.find_by(name: 'SMTP_PASSWORD_SECRET')
           expect(config.value).not_to be_nil
+        end
+
+        it 'encrypts EVOLUTION_HUB_API_KEY at rest' do
+          # evolution_hub requires BOTH keys (IntegrationRequirements); send both so
+          # missing_required_keys passes and the save actually runs.
+          post :create, params: {
+            config_type: 'evolution_hub',
+            app_config: {
+              EVOLUTION_HUB_API_KEY: 'hub-bearer-token-1234',
+              EVOLUTION_HUB_WEBHOOK_SECRET: 'hub-webhook-secret'
+            }
+          }, format: :json
+
+          expect(response).to have_http_status(:ok)
+          config = InstallationConfig.find_by(name: 'EVOLUTION_HUB_API_KEY')
+          # Stored ciphertext is a Fernet token, but decrypts to the real value.
+          expect(config.serialized_value['value']).to start_with('gAAAAA')
+          expect(config.value).to eq('hub-bearer-token-1234')
+        end
+
+        it 'never overwrites EVOLUTION_HUB_API_KEY with a masked sentinel' do
+          InstallationConfig.create!(name: 'EVOLUTION_HUB_API_KEY', serialized_value: { 'value' => 'real-hub-token' })
+          # Seed the paired required secret so missing_required_keys falls back to it
+          # (the payload only touches the API key).
+          InstallationConfig.create!(name: 'EVOLUTION_HUB_WEBHOOK_SECRET', serialized_value: { 'value' => 'wh-secret' })
+
+          post :create, params: {
+            config_type: 'evolution_hub',
+            app_config: { EVOLUTION_HUB_API_KEY: '••••••••1234' }
+          }, format: :json
+
+          expect(response).to have_http_status(:ok)
+          config = InstallationConfig.find_by(name: 'EVOLUTION_HUB_API_KEY')
+          expect(config.value).to eq('real-hub-token')
+        end
+
+        it 'preserves existing EVOLUTION_HUB_API_KEY when sent as null' do
+          InstallationConfig.create!(name: 'EVOLUTION_HUB_API_KEY', serialized_value: { 'value' => 'real-hub-token' })
+          InstallationConfig.create!(name: 'EVOLUTION_HUB_WEBHOOK_SECRET', serialized_value: { 'value' => 'wh-secret' })
+
+          post :create, params: {
+            config_type: 'evolution_hub',
+            app_config: { EVOLUTION_HUB_API_KEY: nil, EVOLUTION_HUB_ENABLED: 'true' }
+          }, format: :json
+
+          expect(response).to have_http_status(:ok)
+          config = InstallationConfig.find_by(name: 'EVOLUTION_HUB_API_KEY')
+          expect(config.value).to eq('real-hub-token')
         end
 
         it 'clears Redis cache after saving' do
