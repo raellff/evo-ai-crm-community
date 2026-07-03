@@ -26,10 +26,11 @@ RSpec.describe ConversationFinder do
   end
 
   # EVO-1958: `agent_bot_inbox` must be preloaded off `inbox` so the serializer
-  # can resolve `Inbox#active_bot?` (called per conversation in the list serializer,
-  # see conversation_serializer.rb:84) in memory rather than firing a per-inbox
-  # SELECT against agent_bot_inboxes.
-  describe '#perform preload' do
+  # can resolve `Inbox#active_bot?` (called per conversation in the list
+  # serializer, see conversation_serializer.rb:84) in memory rather than firing
+  # a per-inbox SELECT against agent_bot_inboxes — and without re-emitting the
+  # per-conversation INFO log that used to live in `Inbox#active_bot?`.
+  describe 'conversation list eager-loading (agent_bot_inbox)' do
     let(:channel) { Channel::Api.create! }
     let(:inbox) { Inbox.create!(name: 'Inbox', channel: channel) }
     let(:contact) { Contact.create!(name: 'C', email: "c-#{SecureRandom.hex(4)}@example.com") }
@@ -44,15 +45,55 @@ RSpec.describe ConversationFinder do
       allow(user).to receive(:administrator?).and_return(true)
     end
 
+    # Build the relation directly instead of via #perform: #perform wraps the
+    # query in `rescue StandardError => empty_result`, so a broken/renamed
+    # preload would be swallowed and surface only as a misleading
+    # "expected [] not to be empty". Loading the relation here lets an
+    # AssociationNotFound raise loudly at its real site.
+    #
+    # status: 'all' bypasses the status filter — the active AgentBotInbox flips
+    # new conversations to `pending` via Inbox#default_conversation_status_value,
+    # so the default 'open' filter would return [].
+    def list_conversations
+      described_class.new(user, { status: 'all' }).send(:build_conversations_query).to_a
+    end
+
     it 'eager-loads inbox.agent_bot_inbox on the conversation list query' do
-      # status: 'all' bypasses the status filter — the setup creates an active
-      # AgentBotInbox which flips new conversations to `pending` via
-      # Inbox#default_conversation_status_value, so filtering by 'open' returns [].
-      result = described_class.new(user, { status: 'all' }).perform
-      conversations = result[:conversations].to_a
+      conversations = list_conversations
 
       expect(conversations).not_to be_empty
       expect(conversations.first.inbox.association(:agent_bot_inbox).loaded?).to be(true)
+    end
+
+    # AC1, literally: reading `active_bot?` per conversation (as the serializer
+    # does) must not fire a SELECT against agent_bot_inboxes once preloaded.
+    it 'reads active_bot? without firing a per-inbox agent_bot_inboxes query' do
+      conversations = list_conversations
+      expect(conversations).not_to be_empty
+
+      agent_bot_inbox_queries = []
+      subscriber = lambda do |*args|
+        sql = args.last[:sql]
+        agent_bot_inbox_queries << sql if sql =~ /agent_bot_inboxes/i
+      end
+
+      ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record') do
+        conversations.each { |conversation| conversation.inbox.active_bot? }
+      end
+
+      expect(agent_bot_inbox_queries).to be_empty
+    end
+
+    # AC2: reading `active_bot?` in the list path must not re-emit the debug
+    # INFO log that previously fired once per conversation on every list render.
+    it 'does not re-emit the per-conversation active_bot? INFO log' do
+      conversations = list_conversations
+      expect(conversations).not_to be_empty
+
+      allow(Rails.logger).to receive(:info).and_call_original
+      conversations.each { |conversation| conversation.inbox.active_bot? }
+
+      expect(Rails.logger).not_to have_received(:info).with(/\[Inbox\] active_bot\?/)
     end
   end
 
