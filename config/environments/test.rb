@@ -37,6 +37,12 @@ Rails.application.configure do
   # Store uploaded files on the local file system in a temporary directory.
   config.active_storage.service = :test
 
+  # Keep attachment delivery in test aligned with dev/staging/production
+  # (proxy by default, ATTACHMENT_DELIVERY=redirect to roll back) so specs
+  # exercise the same URL generation used at runtime (EVO-2006).
+  config.active_storage.resolve_model_to_route =
+    ENV.fetch('ATTACHMENT_DELIVERY', 'proxy').casecmp('redirect').zero? ? :rails_storage_redirect : :rails_storage_proxy
+
   config.action_mailer.perform_caching = false
 
   # Tell Action Mailer not to deliver emails to the real world.

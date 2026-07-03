@@ -40,10 +40,16 @@ Rails.application.configure do
     ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local')
   end.to_sym
 
-  # EVO-2006: serve anexos via proxy (a app le do storage e serve os bytes), para
-  # nao expor o endpoint interno do S3/MinIO nem depender de reescrever presigned
-  # (o host faz parte da assinatura SigV4). Vale p/ browser e containers irmaos.
-  config.active_storage.resolve_model_to_route = :rails_storage_proxy
+  # Attachments are served by the app (ActiveStorage proxy) so the internal
+  # S3/MinIO endpoint never reaches the browser — presigned URLs embed the host
+  # in the SigV4 signature and cannot be rewritten (EVO-2006).
+  # ATTACHMENT_DELIVERY=redirect rolls back to storage redirects (requires a
+  # storage host reachable by browsers and sibling containers).
+  # Security note: proxy blob URLs carry a permanent signed id (anyone with the
+  # link can fetch the file, same as a leaked presigned URL but without expiry);
+  # outbound URLs handed to providers keep a 15-minute TTL (BlobUrlOptions).
+  config.active_storage.resolve_model_to_route =
+    ENV.fetch('ATTACHMENT_DELIVERY', 'proxy').casecmp('redirect').zero? ? :rails_storage_redirect : :rails_storage_proxy
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
   config.force_ssl = ActiveModel::Type::Boolean.new.cast(ENV.fetch('FORCE_SSL', false))

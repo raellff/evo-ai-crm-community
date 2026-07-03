@@ -53,30 +53,27 @@ class Attachment < ApplicationRecord
     base_data.merge(metadata_for_file_type)
   end
 
-  # EVO-2006: com `resolve_model_to_route = :rails_storage_proxy`, esta URL aponta
-  # para a app (/rails/active_storage/.../proxy/...), que le do storage e SERVE o
-  # arquivo direto. Assim o endpoint interno do S3/MinIO nunca chega ao browser —
-  # ao contrario do redirect, cujo 2o hop expunha a presigned do STORAGE_ENDPOINT.
+  # Attachment URLs route through ActiveStorage's resolve_model_to_route
+  # (:rails_storage_proxy by default — see config/environments): the app serves
+  # the bytes, so the storage endpoint (S3/MinIO/Disk) never reaches the
+  # browser (EVO-2006). Hosts come from routes.default_url_options (BACKEND_URL);
+  # ActiveStorage::Current.url_options / ACTIVE_STORAGE_URL do not apply to
+  # route helpers, so these URLs must not be wrapped in BlobUrlOptions scoping.
   def file_url
     return '' unless file.attached?
 
-    BlobUrlOptions.with_scoped_url_options { url_for(file) }
+    url_for(file)
   end
 
-  # EVO-2006: servido pela app via proxy (mesma rota do file_url). Antes usava
-  # `file.blob.url`, que com S3/MinIO gera uma presigned do endpoint interno
-  # (host inalcancavel pelo browser e nao reescrevivel — faz parte da assinatura
-  # SigV4). Com proxy, o download passa sempre pelo host publico da app.
   def download_url
     return '' unless file.attached?
 
-    BlobUrlOptions.with_scoped_url_options { url_for(file) }
+    url_for(file)
   end
 
-  # EVO-2006: representation tambem via proxy (url_for + resolve_model_to_route).
   def thumb_url
     if file.attached? && file.representable?
-      BlobUrlOptions.with_scoped_url_options { url_for(file.representation(resize_to_fill: [250, nil])) }
+      url_for(file.representation(resize_to_fill: [250, nil]))
     else
       ''
     end

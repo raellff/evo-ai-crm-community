@@ -453,10 +453,9 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   def send_media_message(phone_number, message, endpoint)
     attachment = message.attachments.first
 
-    # Use direct S3 URL for media
-    media_url = generate_direct_s3_url(attachment)
+    media_url = generate_media_url(attachment)
 
-    Rails.logger.info "[Evolution Media] Sending #{attachment.file_type} with direct URL: #{media_url}"
+    Rails.logger.info "[Evolution Media] Sending #{attachment.file_type} with URL: #{media_url}"
 
     response = HTTParty.post(
       "#{api_base_path}/message/#{endpoint}/#{instance_name}",
@@ -502,11 +501,9 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   end
 
   def send_audio_with_direct_url(phone_number, attachment)
-    # Generate direct public URL for S3 bucket
-    audio_url = generate_direct_s3_url(attachment)
+    audio_url = generate_media_url(attachment)
 
-    # Debug log
-    Rails.logger.info "[Evolution Audio] Trying direct URL: #{audio_url}"
+    Rails.logger.info "[Evolution Audio] Trying URL: #{audio_url}"
 
     body_data = {
       number: phone_number.delete('+'),
@@ -528,24 +525,17 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     process_response(response)
   end
 
-  def generate_direct_s3_url(attachment)
+  def generate_media_url(attachment)
     return attachment.file_url unless attachment.file.attached?
 
-    # Always use a signed URL — never the bare object URL.
-    # Private buckets (Cloudflare R2, S3 restricted ACLs, MinIO) return an XML
-    # error to unauthenticated GETs; Evolution API then rejects with a MIME-type
-    # error. TTL is 15 minutes (instead of the Rails default of 5 minutes) so
-    # slow providers have enough time to fetch large video/PDF files.
-    #
-    # ACTIVE_STORAGE_URL overrides the host used in DiskService signed URLs so
-    # that external containers (Evolution API, Evolution Go) can actually reach
-    # the file. Without it, localhost:3000 resolves to the caller's container,
-    # not the CRM Rails app. Scoped per-call so the override does not leak to
-    # other ActiveStorage calls within the same request/job.
-    signed_url = BlobUrlOptions.with_scoped_url_options { attachment.file.blob.url(expires_in: 15.minutes) }
+    # App-proxied by default (EVO-2006): a presigned S3/MinIO URL carries the
+    # STORAGE_ENDPOINT host inside the SigV4 signature, so an internal endpoint
+    # is unreachable by the Evolution API container and cannot be rewritten.
+    # See BlobUrlOptions.outbound_media_url for the delivery-mode/TTL rules.
+    media_url = BlobUrlOptions.outbound_media_url(attachment.file.blob)
 
-    Rails.logger.info "[Evolution S3] Using signed URL with 15-minute TTL (host: #{BlobUrlOptions.effective_url_options[:host]})"
-    signed_url
+    Rails.logger.info "[Evolution Media] Outbound media URL with 15-minute TTL (host: #{BlobUrlOptions.effective_url_options[:host]})"
+    media_url
   end
 
   def send_audio_with_base64(phone_number, attachment)

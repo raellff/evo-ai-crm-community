@@ -406,8 +406,7 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
 
     Rails.logger.info "[Evolution Go] Sending #{attachment.file_type} message to #{phone_number}"
 
-    # Use direct S3 URL for media
-    media_url = generate_direct_s3_url(attachment)
+    media_url = generate_media_url(attachment)
 
     # Map file types to Evolution Go types
     evolution_go_type = map_file_type_to_evolution_go(attachment.file_type)
@@ -471,29 +470,17 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
     end
   end
 
-  def generate_direct_s3_url(attachment)
+  def generate_media_url(attachment)
     return attachment.file_url unless attachment.file.attached?
 
-    # Always use a signed URL — never the bare object URL.
-    #
-    # Private buckets (Cloudflare R2, S3 restricted ACLs, MinIO) return an XML
-    # error to unauthenticated GETs; Evolution Go then rejects the upload with
-    # "Invalid file format: 'text/xml; charset=utf-8'".
-    #
-    # TTL is set to 15 minutes instead of the Rails default of 5 minutes because
-    # Evolution Go may take several minutes to fetch large video/PDF files under
-    # provider load. A 5-minute window is too tight and causes silent delivery
-    # failures when the provider is slow.
-    #
-    # ACTIVE_STORAGE_URL overrides the host used in DiskService signed URLs so
-    # that external containers (Evolution Go) can actually reach the file.
-    # Without it, localhost:3000 resolves to the caller's container, not the CRM.
-    # Scoped per-call so the override does not leak to other ActiveStorage calls
-    # within the same request/job.
-    signed_url = BlobUrlOptions.with_scoped_url_options { attachment.file.blob.url(expires_in: 15.minutes) }
+    # App-proxied by default (EVO-2006): a presigned S3/MinIO URL carries the
+    # STORAGE_ENDPOINT host inside the SigV4 signature, so an internal endpoint
+    # is unreachable by the Evolution Go container and cannot be rewritten.
+    # See BlobUrlOptions.outbound_media_url for the delivery-mode/TTL rules.
+    media_url = BlobUrlOptions.outbound_media_url(attachment.file.blob)
 
-    Rails.logger.info "[Evolution Go S3] Using signed URL with 15-minute TTL (host: #{BlobUrlOptions.effective_url_options[:host]})"
-    signed_url
+    Rails.logger.info "[Evolution Go] Outbound media URL with 15-minute TTL (host: #{BlobUrlOptions.effective_url_options[:host]})"
+    media_url
   end
 
   def build_quoted_info(message)
