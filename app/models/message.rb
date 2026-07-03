@@ -92,6 +92,10 @@ class Message < ApplicationRecord
     sticker: 11
   }
   enum :status, { sent: 0, delivered: 1, read: 2, failed: 3 }
+  # Explicit attribute keeps the model bootable when the source column has not been
+  # migrated yet (EVO-1999 deploy scenario: Puma boots before db:migrate runs).
+  # Type/default must stay in sync with db/migrate/20260622120000_add_source_to_messages.rb.
+  attribute :source, :integer, default: 0
   enum :source, { live: 0, imported: 1 }
   # [:submitted_email, :items, :submitted_values] : Used for bot message types
   # [:email] : Used by conversation_continuity incoming email messages

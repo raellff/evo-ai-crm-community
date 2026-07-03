@@ -1,13 +1,18 @@
 # frozen_string_literal: true
 
-# Regression spec for the enum syntax migration (EVO-2007).
+# Regression spec for the enum hardening (EVO-2007).
 #
-# Todos os modelos migraram da sintaxe keyword depreciada `enum nome: {...}` para
-# a posicional do Rails 7.1 `enum :nome, {...}`, e as opções `_prefix:`/`_suffix:`
-# viraram `prefix:`/`suffix:`. Este spec garante que:
-#   1) os enums continuam mapeando os mesmos valores;
-#   2) os enums com prefix ainda geram os métodos prefixados (regressão do _prefix);
-#   3) a coluna nova `source` (Conversation/Message) funciona — foco do incidente.
+# All models were migrated from the keyword enum syntax `enum name: {...}` to the
+# Rails 7.1 positional form `enum :name, {...}`, converting `_prefix:`/`_suffix:`
+# into `prefix:`/`suffix:`. On top of that, Conversation#source and Message#source
+# declare an explicit `attribute :source, :integer, default: 0` so the models stay
+# bootable when the column has not been migrated yet (EVO-1999 deploy scenario).
+#
+# This spec guarantees that:
+#   1) the enums keep mapping the same values;
+#   2) enums with prefix still generate the prefixed methods (`_prefix:` regression);
+#   3) the new `source` column (Conversation/Message) works — focus of the incident;
+#   4) Conversation/Message boot without the source column (EVO-2007 AC 3).
 
 begin
   require 'rails_helper'
@@ -22,54 +27,100 @@ end
 return unless defined?(Rails)
 
 RSpec.describe 'Enum positional syntax (EVO-2007)', type: :model do
-  describe 'mapeamento preservado' do
-    it 'Conversation.sources / Message.sources mantêm live/imported' do
+  describe 'mappings preserved' do
+    it 'keeps live/imported on Conversation.sources and Message.sources' do
       expect(Conversation.sources).to eq('live' => 0, 'imported' => 1)
       expect(Message.sources).to eq('live' => 0, 'imported' => 1)
     end
 
-    it 'Conversation.statuses e priorities intactos' do
+    it 'keeps Conversation.statuses and priorities intact' do
       expect(Conversation.statuses).to eq('open' => 0, 'resolved' => 1, 'pending' => 2, 'snoozed' => 3)
-      expect(Conversation.priorities).to include('low' => 0, 'urgent' => 3)
+      expect(Conversation.priorities).to eq('low' => 0, 'medium' => 1, 'high' => 2, 'urgent' => 3)
     end
 
-    it 'AgentBot.bot_providers (valores string) intactos' do
+    it 'keeps AgentBot.bot_providers (string-backed values) intact' do
       expect(AgentBot.bot_providers).to include('evo_ai_provider' => 'evo_ai', 'webhook_provider' => 'webhook')
     end
   end
 
-  describe 'métodos de source (foco do incidente)' do
-    it 'instância responde a live?/imported? e query methods' do
-      conv = Conversation.new(source: :imported)
-      expect(conv.imported?).to be(true)
-      expect(conv.live?).to be(false)
-      expect(Conversation).to respond_to(:imported)
-      expect(Message).to respond_to(:imported)
+  describe 'source predicate and scope methods (incident focus)' do
+    it 'answers live?/imported? on instances' do
+      conversation = Conversation.new(source: :imported)
+      expect(conversation.imported?).to be(true)
+      expect(conversation.live?).to be(false)
+
+      message = Message.new(source: :live)
+      expect(message.live?).to be(true)
+      expect(message.imported?).to be(false)
+    end
+
+    it 'defaults source to live' do
+      expect(Conversation.new.source).to eq('live')
+      expect(Message.new.source).to eq('live')
+    end
+
+    it 'generates the live/imported scopes' do
+      expect(Conversation.imported.to_sql).to include('source')
+      expect(Message.live.to_sql).to include('source')
     end
   end
 
-  describe 'enums com prefix (regressão do _prefix -> prefix:)' do
-    it 'PipelineTask gera métodos prefixados (task_type_/status_/priority_)' do
-      task = PipelineTask.new
-      expect(task).to respond_to(:task_type_call?)
-      expect(task).to respond_to(:status_pending?)
-      expect(task).to respond_to(:priority_urgent?)
+  describe 'prefixed enums (_prefix -> prefix: regression)' do
+    it 'generates PipelineTask task_type_/status_/priority_ methods that answer correctly' do
+      task = PipelineTask.new(task_type: :call, status: :pending, priority: :urgent)
+      expect(task.task_type_call?).to be(true)
+      expect(task.task_type_email?).to be(false)
+      expect(task.status_pending?).to be(true)
+      expect(task.priority_urgent?).to be(true)
     end
 
-    it 'Pipeline gera métodos com prefix :visibility' do
-      expect(Pipeline.new).to respond_to(:visibility_private?)
+    it 'generates Pipeline methods with the :visibility prefix' do
+      expect(Pipeline.new(visibility: :private).visibility_private?).to be(true)
+      expect(Pipeline.new(visibility: :team).visibility_private?).to be(false)
     end
 
-    it 'MessageTemplate gera métodos prefixados (template_type_/media_type_)' do
-      tmpl = MessageTemplate.new
-      expect(tmpl).to respond_to(:template_type_text?)
-      expect(tmpl).to respond_to(:media_type_image?)
+    it 'generates MessageTemplate template_type_/media_type_ methods' do
+      expect(MessageTemplate.new.template_type_text?).to be(true) # set_defaults assigns 'text'
+      expect(MessageTemplate.new(media_type: 'image').media_type_image?).to be(true)
     end
 
-    it 'ScheduledActionExecutionLog gera status_ prefixado' do
-      log = ScheduledActionExecutionLog.new
-      expect(log).to respond_to(:status_completed?)
-      expect(log).to respond_to(:status_retry_pending?)
+    it 'generates ScheduledActionExecutionLog status_ prefixed methods' do
+      log = ScheduledActionExecutionLog.new(status: :retry_pending)
+      expect(log.status_retry_pending?).to be(true)
+      expect(log.status_completed?).to be(false)
+    end
+  end
+
+  describe 'boot safety without the source column (EVO-1999 scenario, AC 3)' do
+    # `ignored_columns` removes the column from the in-memory schema, which is
+    # exactly what the model sees when Puma boots before db:migrate has run.
+    def model_without_source_column(table, declare_attribute:)
+      Class.new(ApplicationRecord) do
+        self.table_name = table
+        self.ignored_columns += %w[source]
+
+        attribute :source, :integer, default: 0 if declare_attribute
+        enum :source, { live: 0, imported: 1 }
+      end
+    end
+
+    %w[conversations messages].each do |table|
+      it "boots #{table} model and answers imported? when the column is absent" do
+        klass = model_without_source_column(table, declare_attribute: true)
+        stub_const('BootSafetyModel', klass)
+
+        expect { klass.new }.not_to raise_error
+        expect(klass.new.source).to eq('live')
+        expect(klass.new.imported?).to be(false)
+        expect(klass.new(source: :imported).imported?).to be(true)
+      end
+    end
+
+    it 'still raises Undeclared attribute type without the explicit attribute (control)' do
+      klass = model_without_source_column('conversations', declare_attribute: false)
+      stub_const('BootSafetyControlModel', klass)
+
+      expect { klass.new }.to raise_error(RuntimeError, /Undeclared attribute type for enum 'source'/)
     end
   end
 end
