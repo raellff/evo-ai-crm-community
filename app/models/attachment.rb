@@ -53,23 +53,27 @@ class Attachment < ApplicationRecord
     base_data.merge(metadata_for_file_type)
   end
 
-  # NOTE: the URl returned does a 301 redirect to the actual file
+  # Attachment URLs route through ActiveStorage's resolve_model_to_route
+  # (:rails_storage_proxy by default — see config/environments): the app serves
+  # the bytes, so the storage endpoint (S3/MinIO/Disk) never reaches the
+  # browser (EVO-2006). Hosts come from routes.default_url_options (BACKEND_URL);
+  # ActiveStorage::Current.url_options / ACTIVE_STORAGE_URL do not apply to
+  # route helpers, so these URLs must not be wrapped in BlobUrlOptions scoping.
   def file_url
     return '' unless file.attached?
 
-    BlobUrlOptions.with_scoped_url_options { url_for(file) }
+    url_for(file)
   end
 
-  # NOTE: for External services use this methods since redirect doesn't work effectively in a lot of cases
   def download_url
     return '' unless file.attached?
 
-    BlobUrlOptions.with_scoped_url_options { file.blob.url }
+    url_for(file)
   end
 
   def thumb_url
     if file.attached? && file.representable?
-      BlobUrlOptions.with_scoped_url_options { url_for(file.representation(resize_to_fill: [250, nil])) }
+      url_for(file.representation(resize_to_fill: [250, nil]))
     else
       ''
     end

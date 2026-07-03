@@ -103,4 +103,69 @@ RSpec.describe BlobUrlOptions do
       expect(result).to eq('computed-url')
     end
   end
+
+  describe '.outbound_media_url' do
+    let(:blob) do
+      ActiveStorage::Blob.create_and_upload!(
+        io: StringIO.new('outbound-bytes'),
+        filename: 'doc.pdf',
+        content_type: 'application/pdf'
+      )
+    end
+
+    around do |example|
+      original = ENV.fetch('ACTIVE_STORAGE_URL', nil)
+      example.run
+      ENV['ACTIVE_STORAGE_URL'] = original
+    end
+
+    context 'when delivering via proxy (default)' do
+      it 'returns an app-served proxy URL instead of a storage URL' do
+        ENV['ACTIVE_STORAGE_URL'] = nil
+        url = described_class.outbound_media_url(blob)
+        expect(url).to include('/rails/active_storage/blobs/proxy/')
+        expect(url).to end_with('/doc.pdf')
+      end
+
+      it 'honors the ACTIVE_STORAGE_URL host override' do
+        ENV['ACTIVE_STORAGE_URL'] = 'https://media.example.com:8443'
+        url = described_class.outbound_media_url(blob)
+        expect(url).to start_with('https://media.example.com:8443/rails/active_storage/blobs/proxy/')
+      end
+
+      it 'embeds a signed id that expires after the 15-minute TTL' do
+        ENV['ACTIVE_STORAGE_URL'] = nil
+        url = described_class.outbound_media_url(blob)
+        signed_id = url[%r{/blobs/proxy/([^/]+)/}, 1]
+
+        expect(ActiveStorage::Blob.find_signed(signed_id)).to eq(blob)
+        travel(16.minutes) do
+          expect(ActiveStorage::Blob.find_signed(signed_id)).to be_nil
+        end
+      end
+    end
+
+    context 'when delivering via redirect (ATTACHMENT_DELIVERY=redirect)' do
+      around do |example|
+        previous = ActiveStorage.resolve_model_to_route
+        ActiveStorage.resolve_model_to_route = :rails_storage_redirect
+        example.run
+      ensure
+        ActiveStorage.resolve_model_to_route = previous
+      end
+
+      it 'returns the storage service URL, not an app proxy route' do
+        ENV['ACTIVE_STORAGE_URL'] = nil
+        url = described_class.outbound_media_url(blob)
+        expect(url).to include('/rails/active_storage/disk/')
+        expect(url).not_to include('/blobs/proxy/')
+      end
+
+      it 'honors the ACTIVE_STORAGE_URL host override on the storage URL' do
+        ENV['ACTIVE_STORAGE_URL'] = 'https://media.example.com:8443'
+        url = described_class.outbound_media_url(blob)
+        expect(url).to start_with('https://media.example.com:8443/rails/active_storage/disk/')
+      end
+    end
+  end
 end
