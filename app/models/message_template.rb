@@ -72,21 +72,21 @@ class MessageTemplate < ApplicationRecord
   before_save :extract_variables_from_content
   after_initialize :set_defaults
 
-  enum template_type: {
+  enum :template_type, {
     text: 'text',
     media: 'media',
     interactive: 'interactive',
     location: 'location',
     contact: 'contact',
     product: 'product'
-  }, _prefix: true
+  }, prefix: true
 
-  enum media_type: {
+  enum :media_type, {
     image: 'image',
     video: 'video',
     document: 'document',
     audio: 'audio'
-  }, _prefix: true
+  }, prefix: true
 
   # Scopes
   scope :active, -> { where(active: true) }

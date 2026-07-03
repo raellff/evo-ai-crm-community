@@ -84,7 +84,7 @@ class Contact < ApplicationRecord
   before_destroy :ensure_pipeline_items_cleanup, :publish_contact_deleted
   after_destroy_commit :dispatch_destroy_event
 
-  enum contact_type: { visitor: 0, lead: 1, customer: 2 }
+  enum :contact_type, { visitor: 0, lead: 1, customer: 2 }
 
   scope :persons, -> { where(type: 'person') }
   scope :companies, -> { where(type: 'company') }

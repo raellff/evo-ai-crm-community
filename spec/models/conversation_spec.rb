@@ -39,9 +39,8 @@ RSpec.describe Conversation, type: :model do
 
   describe '#assign_to_default_pipeline' do
     context 'quando o contato não está em nenhum pipeline' do
-      before { default_stage } # garante que o pipeline padrão existe com stage
-
       it 'adiciona a conversa ao pipeline padrão' do
+        default_stage # garante que o pipeline padrão existe com stage
         conversation = create_conversation
         expect(PipelineItem.where(conversation: conversation, pipeline: default_pipeline)).to exist
       end
@@ -259,6 +258,31 @@ RSpec.describe Conversation, type: :model do
       expect do
         conv.send(:assign_to_default_pipeline)
       end.to change { PipelineItem.where(conversation: conv).count }.from(0).to(1)
+    end
+  end
+
+  describe 'creation callbacks vs source enum (EVO-2007 AC 2)' do
+    before { default_stage } # default pipeline exists, so a skip is meaningful
+
+    it 'skips the three creation callbacks for imported conversations' do
+      conversation = described_class.new(inbox: inbox, contact: contact, contact_inbox: contact_inbox, source: :imported)
+
+      expect(conversation).not_to receive(:notify_conversation_creation)
+      expect(conversation).not_to receive(:publish_conversation_created)
+      conversation.save!
+
+      expect(PipelineItem.where(conversation: conversation)).not_to exist
+    end
+
+    it 'runs the three creation callbacks for live (default source) conversations' do
+      conversation = described_class.new(inbox: inbox, contact: contact, contact_inbox: contact_inbox)
+
+      expect(conversation).to receive(:notify_conversation_creation)
+      expect(conversation).to receive(:publish_conversation_created)
+      conversation.save!
+
+      expect(conversation.live?).to be(true)
+      expect(PipelineItem.where(conversation: conversation)).to exist
     end
   end
 end

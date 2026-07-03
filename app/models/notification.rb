@@ -41,7 +41,7 @@ class Notification < ApplicationRecord
     pipeline_task_completed: 23
   }.freeze
 
-  enum notification_type: NOTIFICATION_TYPES
+  enum :notification_type, NOTIFICATION_TYPES
 
   before_create :set_last_activity_at
   after_create_commit :process_notification_delivery, :dispatch_create_event
