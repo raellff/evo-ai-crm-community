@@ -14,7 +14,18 @@ Rails.application.config.after_initialize do
   next if ActiveStorage::Blob.respond_to?(:_static_service)
 
   ActiveStorage::Blob.class_eval do
-    BUCKET_BACKED_SERVICES = %w[s3_compatible amazon google microsoft].freeze
+    # Each bucket-backed service reads its bucket/container name from a
+    # DIFFERENT ENV/GlobalConfig key (see config/storage.yml). Map them
+    # explicitly so the fail-safe below checks the right key per provider —
+    # e.g. google uses GCS_BUCKET and microsoft uses AZURE_STORAGE_CONTAINER,
+    # NOT STORAGE_BUCKET_NAME.
+    BUCKET_ENV_BY_SERVICE = {
+      's3_compatible' => 'STORAGE_BUCKET_NAME',
+      'amazon'        => 'S3_BUCKET_NAME',
+      'google'        => 'GCS_BUCKET',
+      'microsoft'     => 'AZURE_STORAGE_CONTAINER'
+    }.freeze
+    BUCKET_BACKED_SERVICES = BUCKET_ENV_BY_SERVICE.keys.freeze
 
     class << self
       alias_method :_static_service, :service
@@ -30,7 +41,7 @@ Rails.application.config.after_initialize do
         # become unusable. Fall back to :local so the CRM stays functional
         # instead of crashing (EVO-1961).
         if BUCKET_BACKED_SERVICES.include?(service_name) && !bucket_configured?(service_name)
-          Rails.logger.warn("[ActiveStorage] '#{service_name}' selected but bucket not configured; falling back to :local")
+          warn_bucket_fallback(service_name)
           service_name = 'local'
         end
 
@@ -48,13 +59,26 @@ Rails.application.config.after_initialize do
       private
 
       def bucket_configured?(service_name)
-        bucket_env = service_name == 'amazon' ? 'S3_BUCKET_NAME' : 'STORAGE_BUCKET_NAME'
+        bucket_env = BUCKET_ENV_BY_SERVICE[service_name]
+        # Unknown/unmapped service: don't second-guess it — let it resolve.
+        return true if bucket_env.nil?
+
         bucket = begin
           GlobalConfigService.load(bucket_env, ENV.fetch(bucket_env, nil))
         rescue StandardError
           ENV.fetch(bucket_env, nil)
         end
         bucket.to_s.strip.present?
+      end
+
+      # `service` is a hot path — it runs for every attachment URL and blob
+      # operation — so warning on each call would flood the logs on a
+      # media-heavy page. Only warn when the offending service changes.
+      def warn_bucket_fallback(service_name)
+        return if @warned_bucket_fallback == service_name
+
+        @warned_bucket_fallback = service_name
+        Rails.logger.warn("[ActiveStorage] '#{service_name}' selected but bucket not configured; falling back to :local")
       end
     end
   end
