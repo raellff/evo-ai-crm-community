@@ -120,7 +120,7 @@ class ConversationFinder
     # chip only appears later if some other action triggers a refetch with the
     # association eager-loaded.
     query = query.preload(
-      :inbox,
+      { inbox: :agent_bot_inbox },
       :contact,
       :assignee,
       :team,

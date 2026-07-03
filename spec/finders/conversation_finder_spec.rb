@@ -25,6 +25,37 @@ RSpec.describe ConversationFinder do
     end
   end
 
+  # EVO-1958: `agent_bot_inbox` must be preloaded off `inbox` so the serializer
+  # can resolve `Inbox#active_bot?` (called per conversation in the list serializer,
+  # see conversation_serializer.rb:84) in memory rather than firing a per-inbox
+  # SELECT against agent_bot_inboxes.
+  describe '#perform preload' do
+    let(:channel) { Channel::Api.create! }
+    let(:inbox) { Inbox.create!(name: 'Inbox', channel: channel) }
+    let(:contact) { Contact.create!(name: 'C', email: "c-#{SecureRandom.hex(4)}@example.com") }
+    let(:contact_inbox) { ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8)) }
+    let(:user) { User.create!(name: 'Admin', email: "a-#{SecureRandom.hex(4)}@example.com") }
+
+    before do
+      AgentBot.create!(name: 'Bot', outgoing_url: 'https://example.test/bot').tap do |bot|
+        AgentBotInbox.create!(agent_bot: bot, inbox: inbox, status: :active)
+      end
+      Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox)
+      allow(user).to receive(:administrator?).and_return(true)
+    end
+
+    it 'eager-loads inbox.agent_bot_inbox on the conversation list query' do
+      # status: 'all' bypasses the status filter — the setup creates an active
+      # AgentBotInbox which flips new conversations to `pending` via
+      # Inbox#default_conversation_status_value, so filtering by 'open' returns [].
+      result = described_class.new(user, { status: 'all' }).perform
+      conversations = result[:conversations].to_a
+
+      expect(conversations).not_to be_empty
+      expect(conversations.first.inbox.association(:agent_bot_inbox).loaded?).to be(true)
+    end
+  end
+
   describe '#apply_permission_filter' do
     let(:relation) { double('Relation') }
 

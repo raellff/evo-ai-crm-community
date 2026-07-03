@@ -147,9 +147,7 @@ class Inbox < ApplicationRecord
   end
 
   def active_bot?
-    result = agent_bot_inbox&.active?
-    Rails.logger.info "[Inbox] active_bot? - inbox_id: #{id}, agent_bot_inbox present?: #{agent_bot_inbox.present?}, agent_bot_inbox&.active?: #{agent_bot_inbox&.active?}, result: #{result}"
-    result
+    agent_bot_inbox&.active?
   end
 
   def inbox_type
