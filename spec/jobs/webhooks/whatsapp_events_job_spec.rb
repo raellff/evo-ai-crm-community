@@ -146,4 +146,72 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
       expect(invalid_template.reload.settings['status']).to eq('APPROVED')
     end
   end
+
+  # EVO-1967: classificacao de evento de mensagem + reconciliacao ativa do canal.
+  describe '#message_event?' do
+    it 'is true for evolution messages.upsert' do
+      expect(described_class.new.send(:message_event?, { event: 'messages.upsert' })).to be(true)
+    end
+
+    it 'is true for a nested WhatsApp Cloud message payload (entry/changes/value/messages)' do
+      cloud = { entry: [{ changes: [{ value: { messages: [{ id: 'x' }] } }] }] }.with_indifferent_access
+      expect(described_class.new.send(:message_event?, cloud)).to be(true)
+    end
+
+    it 'is false for connection.update / non-message events' do
+      expect(described_class.new.send(:message_event?, { event: 'connection.update' })).to be(false)
+    end
+  end
+
+  describe '#reconcile_channel_state! (EVO-1967 Fix B: active reconciliation)' do
+    let(:job) { described_class.new }
+    let(:evo_channel) do
+      instance_double(
+        Channel::Whatsapp, id: 1, provider: 'evolution',
+        provider_config: { 'api_url' => 'http://evolution-api:8080', 'instance_name' => 'vendedor-2', 'instance_token' => 'k' }
+      )
+    end
+
+    before do
+      allow(evo_channel).to receive(:is_a?).with(Channel::Whatsapp).and_return(true)
+      allow(job).to receive(:reconcile_on_cooldown?).and_return(false)
+      allow(job).to receive(:set_reconcile_cooldown!)
+    end
+
+    it 'reauthorizes and returns true when Evolution reports open' do
+      allow(job).to receive(:evolution_connection_state).and_return('open')
+      expect(evo_channel).to receive(:reauthorized!)
+      expect(job.send(:reconcile_channel_state!, evo_channel, { instance: 'vendedor-2' })).to be(true)
+    end
+
+    it 'does NOT reauthorize (and arms cooldown) when Evolution reports a closed state' do
+      allow(job).to receive(:evolution_connection_state).and_return('close')
+      expect(evo_channel).not_to receive(:reauthorized!)
+      expect(job).to receive(:set_reconcile_cooldown!).with(evo_channel)
+      expect(job.send(:reconcile_channel_state!, evo_channel, {})).to be(false)
+    end
+
+    it 'short-circuits (no HTTP) while on cooldown' do
+      allow(job).to receive(:reconcile_on_cooldown?).and_return(true)
+      expect(job).not_to receive(:evolution_connection_state)
+      expect(job.send(:reconcile_channel_state!, evo_channel, {})).to be(false)
+    end
+
+    it 'returns false (skips) for non-evolution providers' do
+      cloud = instance_double(Channel::Whatsapp, provider: 'whatsapp_cloud')
+      allow(cloud).to receive(:is_a?).with(Channel::Whatsapp).and_return(true)
+      expect(job.send(:reconcile_channel_state!, cloud, {})).to be(false)
+    end
+
+    it 'returns false when provider_config is incomplete' do
+      bare = instance_double(Channel::Whatsapp, provider: 'evolution', provider_config: {})
+      allow(bare).to receive(:is_a?).with(Channel::Whatsapp).and_return(true)
+      expect(job.send(:reconcile_channel_state!, bare, {})).to be(false)
+    end
+
+    it 'is resilient: returns false if reconciliation raises' do
+      allow(job).to receive(:evolution_connection_state).and_raise(StandardError)
+      expect(job.send(:reconcile_channel_state!, evo_channel, {})).to be(false)
+    end
+  end
 end

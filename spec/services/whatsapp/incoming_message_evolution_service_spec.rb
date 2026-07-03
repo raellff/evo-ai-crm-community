@@ -64,4 +64,37 @@ RSpec.describe Whatsapp::IncomingMessageEvolutionService do
       service.send(:handle_edited_content)
     end
   end
+
+  describe '#handle_connection_close (EVO-1967: transient vs permanent)' do
+    let(:channel) { instance_double(Channel::Whatsapp, id: 1) }
+    let(:inbox) { instance_double(Inbox, channel: channel) }
+    let(:service) { described_class.new(inbox: inbox, params: { instance: 'vendedor-2' }) }
+
+    before do
+      allow(service).to receive(:processed_params).and_return({ instance: 'vendedor-2' })
+      allow(channel).to receive(:update_provider_connection!)
+      allow(channel).to receive(:prompt_reauthorization!)
+    end
+
+    [440, 428, 408, 503, 515].each do |reason|
+      it "keeps channel active (no reauthorization) on transient reason #{reason}" do
+        expect(channel).not_to receive(:prompt_reauthorization!)
+        expect(channel).to receive(:update_provider_connection!).with(hash_including('connection' => 'close'))
+        service.send(:handle_connection_close, reason)
+      end
+    end
+
+    [401, 403, 411, 500].each do |reason|
+      it "marks reauthorization on permanent reason #{reason}" do
+        expect(channel).to receive(:prompt_reauthorization!)
+        expect(channel).to receive(:update_provider_connection!).with(hash_including('connection' => 'disconnected'))
+        service.send(:handle_connection_close, reason)
+      end
+    end
+
+    it "treats string reason '440' as transient (no reauthorization)" do
+      expect(channel).not_to receive(:prompt_reauthorization!)
+      service.send(:handle_connection_close, '440')
+    end
+  end
 end
