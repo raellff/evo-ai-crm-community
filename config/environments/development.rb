@@ -41,6 +41,9 @@ Rails.application.configure do
 
   # Store uploaded files on the local file system (see config/storage.yml for options).
   config.active_storage.service = ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local').to_sym
+  # EVO-2006: serve anexos via proxy (a app le do storage e serve os bytes), para
+  # nao expor o endpoint interno do S3/MinIO nem depender de reescrever presigned.
+  config.active_storage.resolve_model_to_route = :rails_storage_proxy
 
   config.active_job.queue_adapter = :sidekiq
 

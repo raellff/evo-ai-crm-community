@@ -99,18 +99,19 @@ RSpec.describe Attachment, type: :model do
       end
     end
 
+    # EVO-2006: download_url passou a servir via proxy (url_for + resolve_model_to_route),
+    # em vez de file.blob.url — que com S3/MinIO gerava presigned de host interno.
     context 'when file is attached' do
-      let(:blob) { double('blob') }
-      let(:file_proxy) { double('file', attached?: true, blob: blob) }
+      let(:file_proxy) { instance_double('ActiveStorage::Attached::One', attached?: true) }
 
       before { allow(attachment).to receive(:file).and_return(file_proxy) }
 
-      it 'invokes blob.url under scoped ActiveStorage::Current.url_options with ACTIVE_STORAGE_URL' do
+      it 'uses ACTIVE_STORAGE_URL host/port/protocol when set (scoped url_for/proxy)' do
         ENV['ACTIVE_STORAGE_URL'] = 'https://media.example.com:8443'
         captured = {}
-        allow(blob).to receive(:url) do
+        allow(attachment).to receive(:url_for) do |_arg|
           captured.merge!(ActiveStorage::Current.url_options || {})
-          'https://media.example.com:8443/rails/active_storage/disk/signed'
+          'https://media.example.com:8443/rails/active_storage/blobs/proxy/x'
         end
         attachment.download_url
         expect(captured).to include(host: 'media.example.com', port: 8443, protocol: 'https')
@@ -122,12 +123,24 @@ RSpec.describe Attachment, type: :model do
         previous = { host: 'previous.example.com', port: 9000, protocol: 'http' }
         ActiveStorage::Current.url_options = previous
         ENV['ACTIVE_STORAGE_URL'] = 'https://media.example.com:8443'
-        allow(blob).to receive(:url).and_return('ignored')
+        allow(attachment).to receive(:url_for).and_return('ignored')
         attachment.download_url
         expect(ActiveStorage::Current.url_options).to eq(previous)
       ensure
         ENV['ACTIVE_STORAGE_URL'] = nil
         ActiveStorage::Current.url_options = nil
+      end
+
+      it 'invokes url_for with exactly one positional argument and no kwargs (arity guard)' do
+        captured = { positional: [], kwargs: {} }
+        allow(attachment).to receive(:url_for) do |*args, **kwargs|
+          captured[:positional] = args
+          captured[:kwargs] = kwargs
+          'http://example/x'
+        end
+        attachment.download_url
+        expect(captured[:positional].size).to eq(1)
+        expect(captured[:kwargs]).to be_empty
       end
     end
   end

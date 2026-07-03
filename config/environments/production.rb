@@ -40,6 +40,11 @@ Rails.application.configure do
     ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local')
   end.to_sym
 
+  # EVO-2006: serve anexos via proxy (a app le do storage e serve os bytes), para
+  # nao expor o endpoint interno do S3/MinIO nem depender de reescrever presigned
+  # (o host faz parte da assinatura SigV4). Vale p/ browser e containers irmaos.
+  config.active_storage.resolve_model_to_route = :rails_storage_proxy
+
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
   config.force_ssl = ActiveModel::Type::Boolean.new.cast(ENV.fetch('FORCE_SSL', false))
 
