@@ -72,7 +72,7 @@ class Channel::WebWidget < ApplicationRecord
     self.use_inbox_avatar_for_bot = flags_array.include?(:use_inbox_avatar_for_bot)
   end
 
-  enum reply_time: { in_a_few_minutes: 0, in_a_few_hours: 1, in_a_day: 2 }
+  enum :reply_time, { in_a_few_minutes: 0, in_a_few_hours: 1, in_a_day: 2 }
 
   def name
     'Website'

@@ -32,7 +32,7 @@ class MacroExecution < ApplicationRecord
   belongs_to :conversation
   belongs_to :user
 
-  enum status: { pending: 0, success: 1, failed: 2 }
+  enum :status, { pending: 0, success: 1, failed: 2 }
 
   scope :recent, -> { order(created_at: :desc) }
   scope :for_conversation, ->(conversation) { where(conversation: conversation) }

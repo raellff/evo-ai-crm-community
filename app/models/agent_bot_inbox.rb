@@ -51,7 +51,7 @@ class AgentBotInbox < ApplicationRecord
   belongs_to :inbox
   belongs_to :agent_bot
   belongs_to :facebook_comment_agent_bot, class_name: 'AgentBot', optional: true, foreign_key: 'facebook_comment_agent_bot_id'
-  enum status: { active: 0, inactive: 1 }
+  enum :status, { active: 0, inactive: 1 }
 
   # Valid conversation statuses
   VALID_CONVERSATION_STATUSES = %w[open resolved pending snoozed].freeze

@@ -56,28 +56,28 @@ class PipelineTask < ApplicationRecord
   has_one :contact, through: :pipeline_item
 
   # Enums
-  enum task_type: {
+  enum :task_type, {
     call: 0,
     email: 1,
     meeting: 2,
     follow_up: 3,
     note: 4,
     other: 5
-  }, _prefix: true
+  }, prefix: true
 
-  enum status: {
+  enum :status, {
     pending: 0,
     completed: 1,
     cancelled: 2,
     overdue: 3
-  }, _prefix: true
+  }, prefix: true
 
-  enum priority: {
+  enum :priority, {
     low: 0,
     medium: 1,
     high: 2,
     urgent: 3
-  }, _prefix: true
+  }, prefix: true
 
   # Validations
   validates :title, presence: true, length: { maximum: 255 }

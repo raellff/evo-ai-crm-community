@@ -76,8 +76,8 @@ class Message < ApplicationRecord
   # when you have a temperory id in your frontend and want it echoed back via action cable
   attr_accessor :echo_id
 
-  enum message_type: { incoming: 0, outgoing: 1, activity: 2, template: 3 }
-  enum content_type: {
+  enum :message_type, { incoming: 0, outgoing: 1, activity: 2, template: 3 }
+  enum :content_type, {
     text: 0,
     input_text: 1,
     input_textarea: 2,
@@ -91,8 +91,12 @@ class Message < ApplicationRecord
     integrations: 10,
     sticker: 11
   }
-  enum status: { sent: 0, delivered: 1, read: 2, failed: 3 }
-  enum source: { live: 0, imported: 1 }
+  enum :status, { sent: 0, delivered: 1, read: 2, failed: 3 }
+  # Explicit attribute keeps the model bootable when the source column has not been
+  # migrated yet (EVO-1999 deploy scenario: Puma boots before db:migrate runs).
+  # Type/default must stay in sync with db/migrate/20260622120000_add_source_to_messages.rb.
+  attribute :source, :integer, default: 0
+  enum :source, { live: 0, imported: 1 }
   # [:submitted_email, :items, :submitted_values] : Used for bot message types
   # [:email] : Used by conversation_continuity incoming email messages
   # [:in_reply_to] : Used to reply to a particular tweet in threads

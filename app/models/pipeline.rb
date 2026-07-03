@@ -35,7 +35,7 @@ class Pipeline < ApplicationRecord
   validates :name, presence: true, uniqueness: true
   validates :pipeline_type, inclusion: { in: VALID_TYPES }
 
-  enum visibility: { private: 0, team: 1, public: 2 }, _prefix: :visibility
+  enum :visibility, { private: 0, team: 1, public: 2 }, prefix: :visibility
 
   scope :active, -> { where(is_active: true) }
   scope :default, -> { where(is_default: true) }
