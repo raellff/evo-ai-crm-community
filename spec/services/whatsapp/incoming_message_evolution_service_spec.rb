@@ -79,7 +79,7 @@ RSpec.describe Whatsapp::IncomingMessageEvolutionService do
     [440, 428, 408, 503, 515].each do |reason|
       it "keeps channel active (no reauthorization) on transient reason #{reason}" do
         expect(channel).not_to receive(:prompt_reauthorization!)
-        expect(channel).to receive(:update_provider_connection!).with(hash_including('connection' => 'connecting'))
+        expect(channel).to receive(:update_provider_connection!).with(hash_including('connection' => 'close'))
         service.send(:handle_connection_close, reason)
       end
     end

@@ -634,9 +634,15 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
       params.dig(:entry, 0, :changes, 0, :value, :messages).present?
   end
 
+  # Cooldown para nao re-consultar a Evolution a cada mensagem enquanto o canal segue
+  # nao-open (evita HTTP sincrono repetido no worker). TTL curto para nao atrasar a
+  # recuperacao quando a instancia voltar a 'open'.
+  RECONCILE_COOLDOWN_SECONDS = 30
+
   def reconcile_channel_state!(channel, params)
     return false unless channel.is_a?(Channel::Whatsapp)
     return false unless channel.provider == 'evolution'
+    return false if reconcile_on_cooldown?(channel)
 
     config = channel.provider_config || {}
     api_url = config['api_url'].presence
@@ -644,7 +650,10 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     apikey = (config['instance_token'] || config['admin_token']).presence
     return false if api_url.blank? || instance.blank? || apikey.blank?
 
-    return false unless evolution_connection_state(api_url, instance, apikey) == 'open'
+    unless evolution_connection_state(api_url, instance, apikey) == 'open'
+      set_reconcile_cooldown!(channel) # nao-open -> segura novas consultas por RECONCILE_COOLDOWN_SECONDS
+      return false
+    end
 
     channel.reauthorized! # limpa a flag presa no Redis (mesmo metodo do hotfix de campo)
     true
@@ -653,12 +662,24 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     false
   end
 
+  def reconcile_on_cooldown?(channel)
+    ::Redis::Alfred.get("evo1967:reconcile_cooldown:#{channel.id}").present?
+  rescue StandardError
+    false
+  end
+
+  def set_reconcile_cooldown!(channel)
+    ::Redis::Alfred.setex("evo1967:reconcile_cooldown:#{channel.id}", '1', RECONCILE_COOLDOWN_SECONDS)
+  rescue StandardError
+    nil
+  end
+
   def evolution_connection_state(api_url, instance_name, apikey)
     uri = URI.parse("#{api_url.chomp('/')}/instance/connectionState/#{instance_name}")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = (uri.scheme == 'https')
-    http.open_timeout = 5
-    http.read_timeout = 5
+    http.open_timeout = 2
+    http.read_timeout = 2
     request = Net::HTTP::Get.new(uri)
     request['apikey'] = apikey
     response = http.request(request)

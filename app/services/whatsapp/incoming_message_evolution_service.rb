@@ -139,10 +139,10 @@ class Whatsapp::IncomingMessageEvolutionService < Whatsapp::IncomingMessageBaseS
       channel.prompt_reauthorization!
       channel.update_provider_connection!({ 'connection' => 'disconnected', 'error' => "Connection closed (statusReason: #{status_reason})" })
     else
-      # Transitorio: NAO exigir reautorizacao. Apenas reflete estado transitorio e
-      # deixa a Evolution reconectar (handle_connection_open limpa qualquer flag).
+      # Transitorio: NAO exigir reautorizacao. Reflete o estado (reusa 'close', ja existente)
+      # e deixa a Evolution reconectar (handle_connection_open limpa qualquer flag).
       Rails.logger.warn "Evolution API: Transient disconnect (reason: #{status_reason}) - channel #{channel.id} kept active, awaiting reconnect"
-      channel.update_provider_connection!({ 'connection' => 'connecting', 'error' => "Connection closed (statusReason: #{status_reason})" })
+      channel.update_provider_connection!({ 'connection' => 'close', 'error' => "Connection closed (statusReason: #{status_reason})" })
     end
   rescue StandardError => e
     Rails.logger.error "Evolution API: Failed to handle connection close: #{e.message}"
