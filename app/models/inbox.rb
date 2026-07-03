@@ -65,7 +65,7 @@ class Inbox < ApplicationRecord
   has_many :webhooks, dependent: :destroy_async
   has_many :hooks, dependent: :destroy_async, class_name: 'Integrations::Hook'
 
-  enum sender_name_type: { friendly: 0, professional: 1 }
+  enum :sender_name_type, { friendly: 0, professional: 1 }
 
   after_destroy :delete_round_robin_agents
 

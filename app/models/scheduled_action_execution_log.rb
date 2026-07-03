@@ -38,7 +38,7 @@ class ScheduledActionExecutionLog < ApplicationRecord
     error: 'error'
   }.freeze
 
-  enum status: STATUSES, _prefix: true
+  enum :status, STATUSES, prefix: true
 
   # Scopes
   scope :recent, -> { order(created_at: :desc) }

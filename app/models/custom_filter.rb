@@ -18,7 +18,7 @@ class CustomFilter < ApplicationRecord
   MAX_FILTER_PER_USER = 50
   belongs_to :user
 
-  enum filter_type: { conversation: 0, contact: 1, report: 2 }
+  enum :filter_type, { conversation: 0, contact: 1, report: 2 }
   validate :validate_number_of_filters
 
   def validate_number_of_filters

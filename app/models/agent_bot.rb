@@ -28,8 +28,8 @@ class AgentBot < ApplicationRecord
   has_many :messages, as: :sender, dependent: :nullify
 
   before_destroy :cleanup_associations
-  enum bot_type: { webhook: 0 }
-  enum bot_provider: { webhook_provider: 'webhook', evo_ai_provider: 'evo_ai', n8n_provider: 'n8n' }
+  enum :bot_type, { webhook: 0 }
+  enum :bot_provider, { webhook_provider: 'webhook', evo_ai_provider: 'evo_ai', n8n_provider: 'n8n' }
 
   validates :outgoing_url, length: { maximum: Limits::URL_LENGTH_LIMIT }
   validates :api_key, length: { maximum: 1000 }, allow_blank: true
