@@ -14,6 +14,8 @@ Rails.application.config.after_initialize do
   next if ActiveStorage::Blob.respond_to?(:_static_service)
 
   ActiveStorage::Blob.class_eval do
+    BUCKET_BACKED_SERVICES = %w[s3_compatible amazon google microsoft].freeze
+
     class << self
       alias_method :_static_service, :service
 
@@ -22,8 +24,18 @@ Rails.application.config.after_initialize do
           'ACTIVE_STORAGE_SERVICE',
           ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local')
         ).presence || 'local'
+
+        # Fail-safe: if a bucket-backed service is selected but no bucket is
+        # configured, aws-sdk raises at every request and self-hosted stacks
+        # become unusable. Fall back to :local so the CRM stays functional
+        # instead of crashing (EVO-1961).
+        if BUCKET_BACKED_SERVICES.include?(service_name) && !bucket_configured?(service_name)
+          Rails.logger.warn("[ActiveStorage] '#{service_name}' selected but bucket not configured; falling back to :local")
+          service_name = 'local'
+        end
+
         key = service_name.to_sym
-        resolved = respond_to?(:services) && services[key]
+        resolved = respond_to?(:services) ? services.fetch(key) { nil } : nil
         unless resolved
           Rails.logger.warn("[ActiveStorage] service '#{service_name}' not registered (built at boot); falling back to boot-time default")
         end
@@ -31,6 +43,18 @@ Rails.application.config.after_initialize do
       rescue StandardError => e
         Rails.logger.warn("[ActiveStorage] failed to resolve dynamic service: #{e.message}; falling back to boot-time default")
         _static_service
+      end
+
+      private
+
+      def bucket_configured?(service_name)
+        bucket_env = service_name == 'amazon' ? 'S3_BUCKET_NAME' : 'STORAGE_BUCKET_NAME'
+        bucket = begin
+          GlobalConfigService.load(bucket_env, ENV.fetch(bucket_env, nil))
+        rescue StandardError
+          ENV.fetch(bucket_env, nil)
+        end
+        bucket.to_s.strip.present?
       end
     end
   end
