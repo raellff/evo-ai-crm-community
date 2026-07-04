@@ -1,6 +1,6 @@
 class CreatePipelineItemProducts < ActiveRecord::Migration[7.1]
   def change
-    create_table :pipeline_item_products, id: :uuid do |t|
+    create_table :pipeline_item_products, id: :uuid, if_not_exists: true do |t|
       t.references :pipeline_item, type: :uuid, null: false, foreign_key: { on_delete: :cascade }
       t.references :product, type: :uuid, null: false, foreign_key: { on_delete: :restrict }
       t.references :product_variant, type: :uuid, null: true, foreign_key: { on_delete: :restrict }
@@ -18,10 +18,10 @@ class CreatePipelineItemProducts < ActiveRecord::Migration[7.1]
 
     add_index :pipeline_item_products, [:pipeline_item_id, :product_id, :product_variant_id],
               name: 'index_pipeline_item_products_unique_combo',
-              unique: false
-    add_index :pipeline_item_products, [:created_by_type, :created_by_id], name: 'index_pipeline_item_products_on_creator'
+              unique: false, if_not_exists: true
+    add_index :pipeline_item_products, [:created_by_type, :created_by_id], name: 'index_pipeline_item_products_on_creator', if_not_exists: true
 
-    add_check_constraint :pipeline_item_products, 'quantity > 0', name: 'pipeline_item_products_quantity_positive'
-    add_check_constraint :pipeline_item_products, 'locked_unit_price >= 0', name: 'pipeline_item_products_locked_unit_price_non_negative'
+    add_check_constraint :pipeline_item_products, 'quantity > 0', name: 'pipeline_item_products_quantity_positive', if_not_exists: true
+    add_check_constraint :pipeline_item_products, 'locked_unit_price >= 0', name: 'pipeline_item_products_locked_unit_price_non_negative', if_not_exists: true
   end
 end

@@ -8,7 +8,7 @@
 # string column on an unresolvable id).
 class AddTemplateRefsToInboxes < ActiveRecord::Migration[7.1]
   def change
-    add_column :inboxes, :greeting_message_template_id, :uuid, null: true
-    add_column :inboxes, :out_of_office_message_template_id, :uuid, null: true
+    add_column :inboxes, :greeting_message_template_id, :uuid, null: true, if_not_exists: true
+    add_column :inboxes, :out_of_office_message_template_id, :uuid, null: true, if_not_exists: true
   end
 end

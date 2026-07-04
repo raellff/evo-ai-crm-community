@@ -23,8 +23,17 @@ echo "Database ready to accept connections."
 # Ensure gems are installed and up-to-date
 bundle check || bundle install
 
-# Prepare the database (create if missing, run migrations)
-bundle exec rails db:prepare
+# Prepare the database (create if missing, run migrations).
+# EVO-1999: gate RUN_MIGRATIONS (default 'true' = fail-safe) para que o serviço web
+# sempre migre no boot, inclusive em orquestradores que ignoram o command/entrypoint
+# do compose (CapRover). Defina RUN_MIGRATIONS=false nos *-sidekiq para evitar
+# preparar o banco em duplicado (o db:prepare do web já cobre, via advisory lock).
+if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+  echo "Preparing database (RUN_MIGRATIONS=${RUN_MIGRATIONS:-true})..."
+  bundle exec rails db:prepare
+else
+  echo "Skipping database preparation (RUN_MIGRATIONS=${RUN_MIGRATIONS})."
+fi
 
 # Execute the main process of the container
 exec "$@"

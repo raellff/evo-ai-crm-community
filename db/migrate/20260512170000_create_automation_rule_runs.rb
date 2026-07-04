@@ -1,6 +1,6 @@
 class CreateAutomationRuleRuns < ActiveRecord::Migration[7.1]
   def change
-    create_table :automation_rule_runs, id: :uuid do |t|
+    create_table :automation_rule_runs, id: :uuid, if_not_exists: true do |t|
       t.references :automation_rule, type: :uuid, null: false, foreign_key: { on_delete: :cascade }
       t.string :event_name, null: false
       t.string :status, null: false
@@ -16,8 +16,8 @@ class CreateAutomationRuleRuns < ActiveRecord::Migration[7.1]
 
     add_index :automation_rule_runs, [:automation_rule_id, :started_at],
               order: { started_at: :desc },
-              name: 'index_automation_rule_runs_on_rule_and_started_at'
-    add_index :automation_rule_runs, :started_at
-    add_index :automation_rule_runs, :status
+              name: 'index_automation_rule_runs_on_rule_and_started_at', if_not_exists: true
+    add_index :automation_rule_runs, :started_at, if_not_exists: true
+    add_index :automation_rule_runs, :status, if_not_exists: true
   end
 end

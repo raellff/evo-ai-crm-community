@@ -163,3 +163,11 @@ RUN dos2unix /app/docker/entrypoints/*.sh \
 WORKDIR /app
 
 EXPOSE 3000
+
+# EVO-1999: a imagem sobe pelo rails.sh, que prepara o banco no boot (gate
+# RUN_MIGRATIONS, default true) — assim qualquer orquestrador que ignore o
+# command/entrypoint do compose (CapRover) ainda migra e sobe o schema atualizado.
+# O CMD default sobe o server; o serviço sidekiq sobrescreve o command (e deve
+# setar RUN_MIGRATIONS=false para não preparar o banco em duplicado).
+ENTRYPOINT ["/app/docker/entrypoints/rails.sh"]
+CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000"]
