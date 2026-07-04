@@ -156,9 +156,12 @@ COPY --from=pre-builder /app /app
 # Copy .git_sha file from pre-builder stage
 COPY --from=pre-builder /app/.git_sha /app/.git_sha
 
-# Fix line endings and ensure entrypoint scripts have proper permissions
-RUN dos2unix /app/docker/entrypoints/*.sh \
-  && chmod +x /app/docker/entrypoints/*.sh
+# Fix line endings and ensure entrypoint/bin scripts have proper permissions.
+# Inclui /app/bin/* porque um checkout Windows deixa CRLF no shebang de bin/rails
+# (#!/usr/bin/env ruby\r) -> "env: can't execute 'ruby'" ao rodar `rails runner`.
+# dos2unix ignora arquivos binarios automaticamente, entao e seguro em bin/*.
+RUN dos2unix /app/docker/entrypoints/*.sh /app/bin/* \
+  && chmod +x /app/docker/entrypoints/*.sh /app/bin/*
 
 WORKDIR /app
 
