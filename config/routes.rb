@@ -799,11 +799,6 @@ Rails.application.routes.draw do
   require 'sidekiq/web'
   require 'sidekiq/cron/web'
 
-  namespace :installation do
-    get 'onboarding', to: 'onboarding#index'
-    post 'onboarding', to: 'onboarding#create'
-  end
-
   # Enterprise / consumer plugins mount their routes through the plugin_loader
   # extension point. No-op in the community release — the registry is empty
   # unless a consumer gem registers a plugin. See EXTENSION_POINTS.md §3.

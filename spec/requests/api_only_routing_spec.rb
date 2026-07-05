@@ -25,9 +25,9 @@ RSpec.describe 'API-only routing default (EVO-2010)', type: :routing do
     expect(get: '/app').not_to be_routable
   end
 
-  it 'keeps the installation onboarding endpoints for the SPA' do
-    expect(get: '/installation/onboarding').to route_to('installation/onboarding#index')
-    expect(post: '/installation/onboarding').to route_to('installation/onboarding#create')
+  it 'does not draw the removed installation onboarding endpoints (EVO-2014)' do
+    expect(get: '/installation/onboarding').not_to be_routable
+    expect(post: '/installation/onboarding').not_to be_routable
   end
 
   context 'with EVOLUTION_API_ONLY_SERVER=false (legacy backend-served SPA)' do
