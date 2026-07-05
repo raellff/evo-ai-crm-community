@@ -11,7 +11,7 @@ class DecoupleMessageTemplatesChannel < ActiveRecord::Migration[7.1]
     add_index :message_templates, :name,
               unique: true,
               where: 'channel_id IS NULL',
-              name: 'idx_message_templates_global_name'
+              name: 'idx_message_templates_global_name', if_not_exists: true
   end
 
   def down

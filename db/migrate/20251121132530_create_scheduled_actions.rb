@@ -2,7 +2,7 @@
 
 class CreateScheduledActions < ActiveRecord::Migration[7.0]
   def change
-    create_table :scheduled_actions do |t|
+    create_table :scheduled_actions, if_not_exists: true do |t|
       t.bigint :deal_id
       t.uuid :contact_id
       t.uuid :conversation_id
@@ -22,18 +22,18 @@ class CreateScheduledActions < ActiveRecord::Migration[7.0]
       t.timestamps
     end
 
-    add_index :scheduled_actions, :deal_id
-    add_index :scheduled_actions, :contact_id
-    add_index :scheduled_actions, :conversation_id
-    add_index :scheduled_actions, :scheduled_for
-    add_index :scheduled_actions, :status
-    add_index :scheduled_actions, :action_type
-    add_index :scheduled_actions, [:status, :scheduled_for], name: 'idx_scheduled_actions_status_time'
-    add_index :scheduled_actions, [:deal_id, :status], name: 'idx_scheduled_actions_deal_status'
-    add_index :scheduled_actions, [:contact_id, :status], name: 'idx_scheduled_actions_contact_status'
+    add_index :scheduled_actions, :deal_id, if_not_exists: true
+    add_index :scheduled_actions, :contact_id, if_not_exists: true
+    add_index :scheduled_actions, :conversation_id, if_not_exists: true
+    add_index :scheduled_actions, :scheduled_for, if_not_exists: true
+    add_index :scheduled_actions, :status, if_not_exists: true
+    add_index :scheduled_actions, :action_type, if_not_exists: true
+    add_index :scheduled_actions, [:status, :scheduled_for], name: 'idx_scheduled_actions_status_time', if_not_exists: true
+    add_index :scheduled_actions, [:deal_id, :status], name: 'idx_scheduled_actions_deal_status', if_not_exists: true
+    add_index :scheduled_actions, [:contact_id, :status], name: 'idx_scheduled_actions_contact_status', if_not_exists: true
 
-    add_foreign_key :scheduled_actions, :contacts, on_delete: :cascade
-    add_foreign_key :scheduled_actions, :conversations, on_delete: :cascade
+    add_foreign_key :scheduled_actions, :contacts, on_delete: :cascade, if_not_exists: true
+    add_foreign_key :scheduled_actions, :conversations, on_delete: :cascade, if_not_exists: true
   end
 end
 

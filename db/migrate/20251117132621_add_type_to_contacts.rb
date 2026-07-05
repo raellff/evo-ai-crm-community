@@ -11,10 +11,10 @@ class AddTypeToContacts < ActiveRecord::Migration[7.1]
 
     # Adicionar coluna com ENUM
     unless column_exists?(:contacts, :type)
-      add_column :contacts, :type, :contact_type_enum, default: 'person', null: false
+      add_column :contacts, :type, :contact_type_enum, default: 'person', null: false, if_not_exists: true
     end
 
-    add_index :contacts, :type unless index_exists?(:contacts, :type)
+    add_index :contacts, :type, if_not_exists: true unless index_exists?(:contacts, :type)
 
     # Composite index from OptimizeContactsPerformance (20241020000100). That migration
     # has an earlier timestamp than this one, so on fresh installs it ran before `type`

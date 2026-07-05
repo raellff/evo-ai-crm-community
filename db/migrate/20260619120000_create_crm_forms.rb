@@ -1,6 +1,6 @@
 class CreateCrmForms < ActiveRecord::Migration[7.1]
   def change
-    create_table :crm_forms, id: :uuid do |t|
+    create_table :crm_forms, id: :uuid, if_not_exists: true do |t|
       t.string :name, null: false, limit: 255
       t.string :slug, null: false, limit: 255
       t.string :title, limit: 255
@@ -15,15 +15,15 @@ class CreateCrmForms < ActiveRecord::Migration[7.1]
       t.timestamps
     end
 
-    add_index :crm_forms, :slug, unique: true
-    add_index :crm_forms, :published
-    add_index :crm_forms, :fields, using: :gin
-    add_index :crm_forms, :routing_rules, using: :gin
+    add_index :crm_forms, :slug, unique: true, if_not_exists: true
+    add_index :crm_forms, :published, if_not_exists: true
+    add_index :crm_forms, :fields, using: :gin, if_not_exists: true
+    add_index :crm_forms, :routing_rules, using: :gin, if_not_exists: true
 
-    add_foreign_key :crm_forms, :pipelines, column: :default_pipeline_id
-    add_foreign_key :crm_forms, :pipeline_stages, column: :default_stage_id
+    add_foreign_key :crm_forms, :pipelines, column: :default_pipeline_id, if_not_exists: true
+    add_foreign_key :crm_forms, :pipeline_stages, column: :default_stage_id, if_not_exists: true
 
-    add_check_constraint :crm_forms, "name != ''", name: 'crm_forms_name_not_empty'
-    add_check_constraint :crm_forms, "slug != ''", name: 'crm_forms_slug_not_empty'
+    add_check_constraint :crm_forms, "name != ''", name: 'crm_forms_name_not_empty', if_not_exists: true
+    add_check_constraint :crm_forms, "slug != ''", name: 'crm_forms_slug_not_empty', if_not_exists: true
   end
 end

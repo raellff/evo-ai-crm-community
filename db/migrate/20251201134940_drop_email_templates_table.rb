@@ -1,6 +1,6 @@
 class DropEmailTemplatesTable < ActiveRecord::Migration[7.1]
   def up
-    drop_table :email_templates
+    drop_table :email_templates, if_exists: true
   end
 
   def down

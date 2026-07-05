@@ -1,6 +1,6 @@
 class CreateChannelSendgrid < ActiveRecord::Migration[7.1]
   def change
-    create_table :channel_sendgrid, id: :uuid, default: -> { 'gen_random_uuid()' } do |t|
+    create_table :channel_sendgrid, id: :uuid, default: -> { 'gen_random_uuid()' }, if_not_exists: true do |t|
       t.text :api_key_encrypted, null: false
       t.string :from_email, null: false
       t.string :from_name
@@ -10,6 +10,6 @@ class CreateChannelSendgrid < ActiveRecord::Migration[7.1]
       t.timestamps
     end
 
-    add_index :channel_sendgrid, :from_email
+    add_index :channel_sendgrid, :from_email, if_not_exists: true
   end
 end

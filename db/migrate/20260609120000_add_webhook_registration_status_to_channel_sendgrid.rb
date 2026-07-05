@@ -1,5 +1,5 @@
 class AddWebhookRegistrationStatusToChannelSendgrid < ActiveRecord::Migration[7.1]
   def change
-    add_column :channel_sendgrid, :webhook_registration_status, :string, null: false, default: 'pending'
+    add_column :channel_sendgrid, :webhook_registration_status, :string, null: false, default: 'pending', if_not_exists: true
   end
 end

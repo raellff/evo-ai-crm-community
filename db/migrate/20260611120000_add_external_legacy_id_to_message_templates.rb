@@ -6,11 +6,11 @@
 # can never insert a duplicate global counterpart for the same source row.
 class AddExternalLegacyIdToMessageTemplates < ActiveRecord::Migration[7.1]
   def change
-    add_column :message_templates, :external_legacy_id, :string
+    add_column :message_templates, :external_legacy_id, :string, if_not_exists: true
 
     add_index :message_templates, :external_legacy_id,
               unique: true,
               where: 'external_legacy_id IS NOT NULL',
-              name: 'idx_message_templates_external_legacy_id'
+              name: 'idx_message_templates_external_legacy_id', if_not_exists: true
   end
 end
