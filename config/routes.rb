@@ -4,8 +4,11 @@ Rails.application.routes.draw do
   get '/metrics', to: 'health#metrics'
   post '/api/v1/dynamic_oauth/validate_client', to: 'api/v1/dynamic_oauth#validate_dynamic_client'
 
-  ## renders the frontend paths only if its not an api only server
-  if ActiveModel::Type::Boolean.new.cast(ENV.fetch('EVOLUTION_API_ONLY_SERVER', false))
+  ## Renders the frontend paths only if this is not an API-only server.
+  ## Default true: this backend is API-only (vite_rails removed); the SPA is served
+  ## by the separate evo-frontend service. With default false the backend registered
+  ## root->dashboard#index and tried to render the missing 'vueapp' layout -> HTTP 406.
+  if ActiveModel::Type::Boolean.new.cast(ENV.fetch('EVOLUTION_API_ONLY_SERVER', true))
     root to: 'api#index'
   else
     root to: 'dashboard#index'
