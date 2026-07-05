@@ -24,13 +24,16 @@ echo "Database ready to accept connections."
 bundle check || bundle install
 
 # Prepare the database (create if missing, run migrations).
-# EVO-1999: gate RUN_MIGRATIONS (default 'true' = fail-safe) para que o serviço web
-# sempre migre no boot, inclusive em orquestradores que ignoram o command/entrypoint
-# do compose (CapRover). Defina RUN_MIGRATIONS=false nos *-sidekiq para evitar
-# preparar o banco em duplicado (o db:prepare do web já cobre, via advisory lock).
-if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+# EVO-1999: RUN_MIGRATIONS gate (default 'true' = fail-safe) so the web service
+# always migrates on boot, including on orchestrators that ignore the compose
+# command/entrypoint (CapRover). Set RUN_MIGRATIONS=false on *-sidekiq services to
+# avoid preparing the database twice (the web's db:prepare covers it, via advisory
+# lock). Compared against "false" (not == "true") so TRUE/1/typos still migrate.
+if [ "${RUN_MIGRATIONS:-true}" != "false" ]; then
   echo "Preparing database (RUN_MIGRATIONS=${RUN_MIGRATIONS:-true})..."
-  bundle exec rails db:prepare
+  # Fail-safe: abort the boot if db:prepare fails, instead of starting the server
+  # against a stale/half-migrated schema. Lets the orchestrator restart and retry.
+  bundle exec rails db:prepare || exit 1
 else
   echo "Skipping database preparation (RUN_MIGRATIONS=${RUN_MIGRATIONS})."
 fi

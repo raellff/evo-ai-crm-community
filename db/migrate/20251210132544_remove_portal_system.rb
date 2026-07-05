@@ -4,13 +4,13 @@ class RemovePortalSystem < ActiveRecord::Migration[7.0]
   def up
     # Remove foreign key constraint from inboxes first
     if foreign_key_exists?(:inboxes, :portals)
-      remove_foreign_key :inboxes, :portals
+      remove_foreign_key :inboxes, :portals, if_exists: true
     end
 
     # Remove portal_id column from inboxes
     if column_exists?(:inboxes, :portal_id)
       remove_index :inboxes, :portal_id if index_exists?(:inboxes, :portal_id)
-      remove_column :inboxes, :portal_id
+      remove_column :inboxes, :portal_id, if_exists: true
     end
 
     # Drop join table first

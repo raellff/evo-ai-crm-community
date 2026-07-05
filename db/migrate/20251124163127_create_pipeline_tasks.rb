@@ -1,6 +1,6 @@
 class CreatePipelineTasks < ActiveRecord::Migration[7.0]
   def change
-    create_table :pipeline_tasks, id: :uuid do |t|
+    create_table :pipeline_tasks, id: :uuid, if_not_exists: true do |t|
       t.references :pipeline_item, type: :uuid, null: false, foreign_key: true
       t.uuid :created_by_id, null: false
       t.uuid :assigned_to_id
@@ -26,10 +26,10 @@ class CreatePipelineTasks < ActiveRecord::Migration[7.0]
       t.timestamps
     end
 
-    add_index :pipeline_tasks, [:pipeline_item_id, :status]
-    add_index :pipeline_tasks, [:assigned_to_id, :status, :due_date]
-    add_index :pipeline_tasks, :created_by_id
-    add_index :pipeline_tasks, [:due_date]
-    add_index :pipeline_tasks, [:status, :due_date], where: "status = 0", name: 'index_pipeline_tasks_on_pending_status_and_due_date'
+    add_index :pipeline_tasks, [:pipeline_item_id, :status], if_not_exists: true
+    add_index :pipeline_tasks, [:assigned_to_id, :status, :due_date], if_not_exists: true
+    add_index :pipeline_tasks, :created_by_id, if_not_exists: true
+    add_index :pipeline_tasks, [:due_date], if_not_exists: true
+    add_index :pipeline_tasks, [:status, :due_date], where: "status = 0", name: 'index_pipeline_tasks_on_pending_status_and_due_date', if_not_exists: true
   end
 end
