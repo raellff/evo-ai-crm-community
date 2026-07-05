@@ -58,7 +58,20 @@ class DashboardController < ActionController::Base
   end
 
   def ensure_installation_onboarding
-    redirect_to '/installation/onboarding' if ::Redis::Alfred.get(::Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING)
+    return unless ::Redis::Alfred.get(::Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING)
+
+    # EVO-2013: if a user already exists the installation is not virgin — the flag
+    # went orphan (e.g. the admin was created by evo-auth-service and synced on
+    # login, never passing through the CRM onboarding#create, or a seed re-run).
+    # Clear it and skip the redirect to break the onboarding loop. (Evo CRM is
+    # single-tenant, there is no Account model — an existing User is the signal
+    # for "installation already in use".)
+    if User.exists?
+      ::Redis::Alfred.delete(::Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING)
+      return
+    end
+
+    redirect_to '/installation/onboarding'
   end
 
   def render_hc_if_custom_domain

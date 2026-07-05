@@ -37,6 +37,15 @@ class Installation::OnboardingController < ApplicationController
   end
 
   def ensure_installation_onboarding
-    redirect_to '/' unless ::Redis::Alfred.get(::Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING)
+    return redirect_to '/' unless ::Redis::Alfred.get(::Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING)
+
+    # EVO-2013: on API-only deploys (EVOLUTION_API_ONLY_SERVER default true) the
+    # dashboard routes are not drawn, so the dashboard-side guard never runs and an
+    # orphan flag would keep these endpoints open forever. Same rule as there: an
+    # existing User means the installation is not virgin — clear the flag and leave.
+    return unless User.exists?
+
+    ::Redis::Alfred.delete(::Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING)
+    redirect_to '/'
   end
 end

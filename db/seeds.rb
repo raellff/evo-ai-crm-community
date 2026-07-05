@@ -4,8 +4,13 @@ ConfigLoader.new.process
 
 ## Seeds productions
 if Rails.env.production?
-  # Setup Onboarding flow
-  Redis::Alfred.set(Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING, true)
+  # Setup Onboarding flow — only mark onboarding as pending on a virgin install.
+  # EVO-2013: without the `unless User.exists?` guard a seed re-run on an already
+  # configured installation re-sets the flag and traps users on
+  # /installation/onboarding (the flag is only cleared by onboarding#create).
+  # Evo CRM is single-tenant (no Account model); an existing User is the signal
+  # for "installation already in use".
+  Redis::Alfred.set(Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING, true) unless User.exists?
 end
 
 ## Seeds for Local Development
