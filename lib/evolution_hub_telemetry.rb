@@ -1,6 +1,6 @@
 # TODO: lets use HTTParty instead of RestClient
 #
-# Legacy telemetry client (kept for installation/onboarding). The active
+# Legacy telemetry client (kept for push notification relay). The active
 # Evolution Hub *proxy* integration uses the EvolutionHub::* module namespace
 # (lib/evolution_hub/{client,inbox_builder}.rb + app/services/evolution_hub/).
 class EvolutionHubTelemetry
