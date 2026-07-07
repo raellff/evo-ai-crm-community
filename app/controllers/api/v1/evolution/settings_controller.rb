@@ -1,6 +1,12 @@
 class Api::V1::Evolution::SettingsController < Api::V1::BaseController
   include EvolutionConcern
 
+  require_permissions({
+    show: 'inboxes.read',
+    create: 'inboxes.update',
+    update: 'inboxes.update'
+  })
+
   def show
     Rails.logger.info "Evolution API get settings called for instance: #{params[:id]}"
 

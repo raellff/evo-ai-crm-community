@@ -1,6 +1,11 @@
 class Api::V1::EvolutionGo::SettingsController < Api::V1::BaseController
   include EvolutionGoConcern
 
+  require_permissions({
+    show: 'inboxes.read',
+    update: 'inboxes.update'
+  })
+
   before_action :set_instance_params, only: [:show, :update]
 
   # GET SETTINGS - GET /instance/:instanceId/advanced-settings

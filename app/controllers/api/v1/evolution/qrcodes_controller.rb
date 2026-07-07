@@ -1,6 +1,11 @@
 class Api::V1::Evolution::QrcodesController < Api::V1::BaseController
   include EvolutionConcern
 
+  require_permissions({
+    show: 'inboxes.read',
+    create: 'inboxes.update'
+  })
+
   def show
     Rails.logger.info "Evolution API get QR code called for instance: #{params[:id]}"
 
