@@ -1,4 +1,10 @@
 class Api::V1::Actions::ContactMergesController < Api::V1::BaseController
+  # Merging destroys the mergee contact irreversibly, so it demands the
+  # delete-level grant rather than plain update.
+  require_permissions({
+    create: 'contacts.delete'
+  })
+
   before_action :set_base_contact, only: [:create]
   before_action :set_mergee_contact, only: [:create]
 

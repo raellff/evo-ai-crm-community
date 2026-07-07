@@ -1,4 +1,5 @@
 class Api::V1::BulkActionsController < Api::V1::BaseController
+  before_action :check_bulk_action_permission!
   before_action :type_matches?
 
   def create
@@ -22,6 +23,14 @@ class Api::V1::BulkActionsController < Api::V1::BaseController
   end
 
   private
+
+  # The permission follows the record type being mutated: conversation bulk
+  # actions demand conversations.update; contact bulk actions demand
+  # contacts.delete, since BulkActionsJob only supports deletion for contacts.
+  def check_bulk_action_permission!
+    permission_key = params[:type] == 'Conversation' ? 'conversations.update' : 'contacts.delete'
+    check_permission!(permission_key, :user)
+  end
 
   def type_matches?
     ['Conversation', 'Contact'].include?(params[:type])
