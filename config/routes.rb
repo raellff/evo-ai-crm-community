@@ -310,7 +310,6 @@ Rails.application.routes.draw do
           get :conversations
           get :messages
           get :contacts
-          get :articles
         end
       end
 
@@ -345,8 +344,8 @@ Rails.application.routes.draw do
           post 'facebook/feed', to: 'webhooks/facebook#feed_events'
 
           # Twitter webhooks
-          get 'twitter', to: 'api/v1/webhooks#twitter_crc'
-          post 'twitter', to: 'api/v1/webhooks#twitter_events'
+          get 'twitter', to: '/api/v1/webhooks#twitter_crc'
+          post 'twitter', to: '/api/v1/webhooks#twitter_events'
 
           # Gmail webhooks
           post 'gmail/pubsub', to: 'webhooks/gmail#pubsub'

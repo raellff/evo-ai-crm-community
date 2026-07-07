@@ -97,7 +97,8 @@ RSpec.describe Api::V1::ConversationsController, type: :controller do
     # If the action is missing from the require_permissions mapping, the method
     # is absent — this spec fails the moment the gate is removed.
     it 'installs check_return_to_bot_permission! via require_permissions' do
-      expect(described_class.private_instance_methods).to include(:check_return_to_bot_permission!)
+      # define_method at the class-body top creates a PUBLIC method.
+      expect(described_class.instance_methods).to include(:check_return_to_bot_permission!)
     end
 
     it 'invokes check_permission! with the conversations.toggle_status key' do
