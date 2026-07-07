@@ -23,7 +23,16 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     email_team: 'conversations.update',
     available_for_pipeline: 'conversations.read',
     unread_count: 'conversations.read',
-    import: 'conversations.import'
+    import: 'conversations.import',
+    mute: 'conversations.mute',
+    unmute: 'conversations.unmute',
+    update_last_seen: 'conversations.update_last_seen',
+    unread: 'conversations.unread',
+    toggle_typing_status: 'conversations.toggle_typing_status',
+    meta: 'conversations.meta',
+    search: 'conversations.search',
+    filter: 'conversations.filter',
+    attachments: 'conversations.attachments'
   })
 
   CONVERSATIONS_IMPORT_ROW_LIMIT = 50_000

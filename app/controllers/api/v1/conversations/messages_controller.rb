@@ -1,4 +1,12 @@
 class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseController
+  require_permissions({
+    index: 'conversations.read',
+    create: 'conversations.update',
+    update: 'conversations.update',
+    destroy: 'conversations.update',
+    retry: 'conversations.update'
+  })
+
   before_action :ensure_api_inbox, only: :update
 
   def index

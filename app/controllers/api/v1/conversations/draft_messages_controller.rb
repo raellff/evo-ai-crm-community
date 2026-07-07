@@ -1,4 +1,10 @@
 class Api::V1::Conversations::DraftMessagesController < Api::V1::Conversations::BaseController
+  require_permissions({
+    show: 'conversations.read',
+    update: 'conversations.update',
+    destroy: 'conversations.update'
+  })
+
   def show
     unless Redis::Alfred.exists?(draft_redis_key)
       return success_response(

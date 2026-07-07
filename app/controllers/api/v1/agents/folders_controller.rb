@@ -2,9 +2,14 @@ class Api::V1::Agents::FoldersController < Api::V1::BaseController
   require_permissions({
     index: 'agent_folders.read',
     show: 'agent_folders.read',
+    list: 'agent_folders.read',
+    agents: 'agent_folders.read',
     create: 'agent_folders.create',
     update: 'agent_folders.update',
-    destroy: 'agent_folders.delete'
+    destroy: 'agent_folders.delete',
+    share: 'agent_shared_folders.create',
+    shared: 'agent_shared_folders.read',
+    shared_folders: 'agent_shared_folders.read'
   })
   
   
