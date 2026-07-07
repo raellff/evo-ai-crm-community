@@ -22,6 +22,9 @@ RSpec.describe 'Partially mapped write actions RBAC', type: :request do
     allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
       Current.user = probe
       Current.evo_permission_cache ||= {}
+      # Inbox visibility is not under test here; grant read_all so the probe
+      # reaches the permission gate instead of being scoped out of the fixture.
+      Current.evo_can_read_all_inboxes = true
     end
   end
 

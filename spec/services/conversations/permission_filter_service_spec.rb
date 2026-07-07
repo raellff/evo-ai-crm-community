@@ -48,14 +48,14 @@ RSpec.describe Conversations::PermissionFilterService do
     end
   end
 
-  context 'when the user has no assignment (opt-in default)' do
+  context 'when the user has no assignment and no read_all grant' do
     before do
       Current.evo_role_key = 'agent_restricted'
       Current.evo_can_read_all_inboxes = false
     end
 
-    it 'returns all conversations' do
-      expect(perform).to contain_exactly(conv_a, conv_b)
+    it 'returns no conversations (visibility is permission/membership-driven)' do
+      expect(perform).to be_empty
     end
   end
 

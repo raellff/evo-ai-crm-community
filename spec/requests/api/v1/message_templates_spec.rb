@@ -279,7 +279,12 @@ RSpec.describe 'Api::V1::MessageTemplates', type: :request do
                                          channel: whatsapp_channel('whatsapp_cloud'))
       forbidden_user = User.create!(name: 'No Perm', email: "noperm-#{SecureRandom.hex(4)}@example.com")
       allow_any_instance_of(Api::V1::InboxesController)
-        .to receive(:authenticate_request!) { Current.user = forbidden_user }
+        .to receive(:authenticate_request!) do
+          Current.user = forbidden_user
+          # Visibility is not under test: without read_all the inbox lookup
+          # scopes the fixture out (404) before the permission gate can 403.
+          Current.evo_can_read_all_inboxes = true
+        end
       allow_any_instance_of(EvoAuthService).to receive(:check_user_permission).and_return(false)
 
       post "/api/v1/inboxes/#{inbox.id}/message_templates/#{template.id}/sync_with_whatsapp_cloud", as: :json

@@ -28,8 +28,8 @@ class InboxPolicy < ApplicationPolicy
     # EvoAuthConcern — the CRM `has_permission?` is a no-op stub) can view any inbox.
     return true if @user&.administrator? || Current.evo_can_read_all_inboxes
 
-    # Restricted users can only view their assigned inboxes. `assigned_inboxes`
-    # itself returns all inboxes when the user has no inbox_member (opt-in default).
+    # Restricted users can only view their assigned inboxes; a user with no
+    # membership and no conversations.read_all grant sees none.
     Current.user&.assigned_inboxes&.include?(record) || false
   end
 
