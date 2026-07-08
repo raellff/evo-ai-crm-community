@@ -20,6 +20,7 @@ RSpec.describe 'API v1 mutating actions permission guard' do
 
   EXEMPT_CONTROLLERS = {
     'api/v1/conversations/direct_uploads' => 'ActiveStorage subclass; conversation-scoped token flow',
+    'api/v1/admin/app_configs' => 'Pundit-gated superadmin (Admin::BaseController before_action authorize :installation_config, :manage?)',
     'api/v1/inbox_members' => 'Pundit-gated per action (authorize @inbox, :create?/:update?/:destroy?)',
     'api/v1/profiles' => 'self-service: mutates only the authenticated user profile',
     'api/v1/notifications' => 'self-service: mutates only the caller notifications',
@@ -45,6 +46,10 @@ RSpec.describe 'API v1 mutating actions permission guard' do
     # matching how sibling update/destroy are authorized in these controllers.
     'api/v1/scheduled_actions' => %w[create],
     'api/v1/pipeline_tasks' => %w[create],
+    # Pundit-gated on the parent pipeline (authorize @pipeline): mutations at
+    # write-level (:update?), reads at :view?; skipped for service tokens.
+    'api/v1/pipeline_items' =>
+      %w[create update destroy bulk_move move_conversation move_to_stage update_conversation update_custom_fields],
     # POST-shaped reads inside the new-conversation flow.
     'api/v1/contact_inboxes' => %w[filter],
     'api/v1/contacts/contact_inboxes' => %w[create]
@@ -67,9 +72,7 @@ RSpec.describe 'API v1 mutating actions permission guard' do
   # Every entry is DEBT for the RBAC follow-up: shrink this list, never grow
   # it (a new entry means a new ungated endpoint shipped).
   PENDING_GATES = {
-    'api/v1/admin/app_configs' => %w[create destroy test_connection],
     'api/v1/integrations/webhooks' => %w[create],
-    'api/v1/pipeline_items' => %w[create update destroy bulk_move move_conversation move_to_stage update_conversation update_custom_fields],
     'api/v1/pipeline_tasks' => %w[update destroy move reorder add_subtask cancel complete reopen for_conversation],
     'api/v1/scheduled_actions' => %w[update destroy]
   }.freeze
