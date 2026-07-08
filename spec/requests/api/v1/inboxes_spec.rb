@@ -80,14 +80,14 @@ RSpec.describe 'Api::V1::Inboxes inbox scoping', type: :request do
       end
     end
 
-    context 'when the user has no inbox assignment and no read_all (AC11 — opt-in default)' do
+    context 'when the user has no inbox assignment and no read_all' do
       before { stub_auth(role_key: 'agent_restricted', granted: %w[inboxes.read]) }
 
-      it 'returns all inboxes' do
+      it 'returns no inboxes (visibility is permission/membership-driven)' do
         get '/api/v1/inboxes', headers: headers, as: :json
 
         expect(response).to have_http_status(:ok)
-        expect(returned_inbox_ids).to contain_exactly(inbox_a.id, inbox_b.id, inbox_c.id)
+        expect(returned_inbox_ids).to be_empty
       end
     end
 

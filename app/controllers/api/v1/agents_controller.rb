@@ -2,6 +2,7 @@ class Api::V1::AgentsController < Api::V1::BaseController
   require_permissions({
     index: 'agents.read',
     create: 'agents.create',
+    bulk_create: 'agents.create',
     update: 'agents.update',
     destroy: 'agents.delete'
   })

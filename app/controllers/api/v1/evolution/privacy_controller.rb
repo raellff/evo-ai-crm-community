@@ -1,6 +1,11 @@
 class Api::V1::Evolution::PrivacyController < Api::V1::BaseController
   include EvolutionConcern
 
+  require_permissions({
+    show: 'inboxes.read',
+    update: 'inboxes.update'
+  })
+
   before_action :set_channel, only: [:show, :update]
 
   # GET /api/v1/evolution/privacy/:id

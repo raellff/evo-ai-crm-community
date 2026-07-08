@@ -1,6 +1,14 @@
 class Api::V1::Evolution::ProfileController < Api::V1::BaseController
   include EvolutionConcern
 
+  require_permissions({
+    fetch: 'inboxes.read',
+    update_name: 'inboxes.update',
+    update_status: 'inboxes.update',
+    update_picture: 'inboxes.update',
+    remove_picture: 'inboxes.update'
+  })
+
   # POST /api/v1/evolution/profile/:instance_name/fetch
   def fetch
     Rails.logger.info "Evolution API fetch profile called for instance: #{params[:instance_name]}"

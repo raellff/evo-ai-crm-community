@@ -17,9 +17,10 @@ class Conversations::PermissionFilterService
   private
 
   def accessible_conversations
-    # Use assigned_inboxes (not raw inboxes) so the opt-in default (no assignment =
-    # see all) and `conversations.read_all` are honored consistently. Degrade to
-    # all inboxes when there is no resolvable user (e.g. service contexts).
+    # Use assigned_inboxes (not raw inboxes) so `conversations.read_all` is
+    # honored consistently; no membership and no grant means no inboxes.
+    # Degrade to all inboxes only when there is no resolvable user (service
+    # contexts).
     accessible = user&.assigned_inboxes || Inbox.all
     conversations.where(inbox: accessible)
   end

@@ -1,4 +1,10 @@
 class Api::V1::CallbacksController < Api::V1::BaseController
+  require_permissions({
+    register_facebook_page: 'inboxes.create',
+    facebook_pages: 'inboxes.read',
+    reauthorize_page: 'inboxes.update'
+  })
+
   before_action :inbox, only: [:reauthorize_page]
 
   def register_facebook_page

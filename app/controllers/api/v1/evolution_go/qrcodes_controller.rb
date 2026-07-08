@@ -1,6 +1,11 @@
 class Api::V1::EvolutionGo::QrcodesController < Api::V1::BaseController
   include EvolutionGoConcern
 
+  require_permissions({
+    show: 'inboxes.read',
+    create: 'inboxes.update'
+  })
+
   before_action :set_instance_params, only: [:show, :create]
 
   def show

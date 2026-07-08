@@ -3,6 +3,7 @@
 class Api::V1::ScheduledActionsController < Api::V1::BaseController
   before_action :set_scheduled_action, only: [:show, :update, :destroy]
   before_action :check_authorization, only: [:update, :destroy]
+  before_action :authorize_create, only: [:create]
 
   def index
     @scheduled_actions = fetch_scheduled_actions
@@ -23,7 +24,7 @@ class Api::V1::ScheduledActionsController < Api::V1::BaseController
 
   def create
     @scheduled_action = ScheduledAction.new(scheduled_action_params)
-    
+
     # Set created_by - use current_user if available, otherwise use a system user for service token auth
     if current_user.present?
       @scheduled_action.created_by = current_user.id
@@ -132,6 +133,13 @@ class Api::V1::ScheduledActionsController < Api::V1::BaseController
 
   def check_authorization
     authorize @scheduled_action
+  end
+
+  # Authorized in a before_action (not inside #create) so the policy denial
+  # surfaces as an authorization error instead of being swallowed by the
+  # action's own rescue StandardError and reported as a 500.
+  def authorize_create
+    authorize ScheduledAction unless service_authenticated?
   end
 
   def fetch_scheduled_actions

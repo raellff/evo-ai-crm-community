@@ -1,6 +1,11 @@
 class Api::V1::Evolution::InstancesController < Api::V1::BaseController
   include EvolutionConcern
 
+  require_permissions({
+    index: 'inboxes.read',
+    logout: 'inboxes.update'
+  })
+
   def index
     Rails.logger.info "Evolution API fetch instances called with params: #{params.inspect}"
 

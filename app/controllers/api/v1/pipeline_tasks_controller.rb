@@ -41,6 +41,7 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
 
   def create
     @task = @pipeline_item.tasks.new(task_params)
+    authorize @task, policy_class: PipelineTaskPolicy unless service_authenticated?
     @task.created_by = Current.user
 
     if @task.save

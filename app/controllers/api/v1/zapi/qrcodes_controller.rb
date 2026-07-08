@@ -1,6 +1,13 @@
 # frozen_string_literal: true
 
 class Api::V1::Zapi::QrcodesController < Api::V1::BaseController
+  require_permissions({
+    show: 'inboxes.read',
+    status: 'inboxes.read',
+    create: 'inboxes.update',
+    refresh: 'inboxes.update'
+  })
+
   before_action :set_instance_params, only: [:show, :create, :refresh]
 
   def show

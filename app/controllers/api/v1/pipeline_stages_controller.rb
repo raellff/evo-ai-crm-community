@@ -4,7 +4,11 @@ class Api::V1::PipelineStagesController < Api::V1::BaseController
     show: 'pipeline_stages.read',
     create: 'pipeline_stages.create',
     update: 'pipeline_stages.update',
-    destroy: 'pipeline_stages.delete'
+    destroy: 'pipeline_stages.delete',
+    move_up: 'pipeline_stages.update',
+    move_down: 'pipeline_stages.update',
+    reorder: 'pipeline_stages.update',
+    bulk_move_conversations: 'pipeline_stages.update'
   })
   before_action :fetch_pipeline
   

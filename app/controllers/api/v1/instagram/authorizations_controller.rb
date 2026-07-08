@@ -4,7 +4,8 @@ class Api::V1::Instagram::AuthorizationsController < Api::V1::BaseController
     show: 'instagram_authorizations.read',
     create: 'instagram_authorizations.create',
     update: 'instagram_authorizations.update',
-    destroy: 'instagram_authorizations.delete'
+    destroy: 'instagram_authorizations.delete',
+    callback: 'instagram_authorizations.create'
   })
   include InstagramConcern
   include Instagram::IntegrationHelper

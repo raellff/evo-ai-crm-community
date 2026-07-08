@@ -1,4 +1,12 @@
 class Api::V1::Contacts::NotesController < Api::V1::Contacts::BaseController
+  require_permissions({
+    index: 'contacts.read',
+    show: 'contacts.read',
+    create: 'contacts.update',
+    update: 'contacts.update',
+    destroy: 'contacts.update'
+  })
+
   before_action :note, except: [:index, :create]
 
   def index

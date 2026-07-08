@@ -1,4 +1,8 @@
-class Api::V1::UploadController < Api::V1::BaseController
+class Api::V1::UploadsController < Api::V1::BaseController
+  require_permissions({
+    create: 'conversations.attachments'
+  })
+
   def create
     result = if params[:attachment].present?
                create_from_file

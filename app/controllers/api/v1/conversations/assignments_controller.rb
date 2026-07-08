@@ -1,4 +1,8 @@
 class Api::V1::Conversations::AssignmentsController < Api::V1::Conversations::BaseController
+  require_permissions({
+    create: 'conversations.update'
+  })
+
   # assigns agent/team to a conversation
   def create
     if params.key?(:assignee_id)

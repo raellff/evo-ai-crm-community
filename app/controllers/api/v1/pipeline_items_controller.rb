@@ -4,6 +4,13 @@
 class Api::V1::PipelineItemsController < Api::V1::BaseController
   include Events::Types
 
+  # Mutating actions authorize against the pipeline write policy; reads stay at
+  # view level.
+  WRITE_ACTIONS = %w[
+    create update destroy bulk_move move_conversation
+    move_to_stage update_conversation update_custom_fields
+  ].freeze
+
   before_action :set_pipeline
   before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields]
   before_action :ensure_authorized_user
@@ -762,7 +769,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   def ensure_authorized_user
     return if service_authenticated?
 
-    authorize @pipeline, :view?
+    authorize @pipeline, WRITE_ACTIONS.include?(action_name) ? :update? : :view?
   end
 end
 # rubocop:enable Metrics/ClassLength
