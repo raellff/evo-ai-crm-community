@@ -5,7 +5,7 @@ class Api::V1::Oauth::ApplicationsController < Api::V1::BaseController
     create: 'oauth_applications.create',
     update: 'oauth_applications.update',
     destroy: 'oauth_applications.delete',
-    regenerate_secret: 'oauth_applications.update'
+    regenerate_secret: 'oauth_applications.regenerate_secret'
   })
   
   before_action :set_application, only: [:show, :update, :destroy, :regenerate_secret]

@@ -118,4 +118,28 @@ RSpec.describe 'Partially mapped write actions RBAC', type: :request do
       expect(response).to have_http_status(:forbidden)
     end
   end
+
+  describe 'POST /api/v1/oauth/applications/:id/regenerate_secret' do
+    let(:application) do
+      OauthApplication.create!(name: "App #{SecureRandom.hex(3)}", redirect_uri: 'https://oauth.example.com/cb')
+    end
+
+    it 'denies a holder of only oauth_applications.update (dedicated key required)' do
+      grant_permissions('oauth_applications.read', 'oauth_applications.update')
+
+      post "/api/v1/oauth/applications/#{application.uid}/regenerate_secret", as: :json
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'regenerates for a holder of oauth_applications.regenerate_secret' do
+      grant_permissions('oauth_applications.read', 'oauth_applications.regenerate_secret')
+      previous_secret = application.secret
+
+      post "/api/v1/oauth/applications/#{application.uid}/regenerate_secret", as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(application.reload.secret).not_to eq(previous_secret)
+    end
+  end
 end
