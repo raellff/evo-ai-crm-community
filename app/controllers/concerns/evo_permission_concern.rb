@@ -6,10 +6,23 @@ module EvoPermissionConcern
   extend ActiveSupport::Concern
   AUTHZ_REMOTE_CACHE_TTL = 30.seconds
 
+  # Registry of every permission key declared through require_permission(s),
+  # populated at class-load time. Consumed by the RBAC conformance spec to
+  # assert each declared key exists in the auth catalog.
+  def self.declared_permission_keys
+    @declared_permission_keys ||= Set.new
+  end
+
+  def self.register_permission_key(permission_key)
+    declared_permission_keys << permission_key
+  end
+
   class_methods do
     # Define multiplas permissoes de uma vez
     def require_permissions(mapping, type: :user)
       mapping.each do |action, permission_key|
+        EvoPermissionConcern.register_permission_key(permission_key)
+
         define_method("check_#{action}_permission!") do
           check_permission!(permission_key, type)
         end
@@ -20,6 +33,8 @@ module EvoPermissionConcern
 
     # Define permissao para uma action especifica
     def require_permission(action, permission_key, type: :user)
+      EvoPermissionConcern.register_permission_key(permission_key)
+
       define_method("check_#{action}_permission!") do
         check_permission!(permission_key, type)
       end
