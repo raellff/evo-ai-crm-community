@@ -41,6 +41,10 @@ RSpec.describe 'API v1 mutating actions permission guard' do
     # Pundit-gated channel creation (authorize ::Inbox, :create?).
     'api/v1/channels/twilio_channels' => %w[create],
     'api/v1/channels/notificame_channels' => %w[verify],
+    # Pundit-gated creation (authorize with the resource policy #create?),
+    # matching how sibling update/destroy are authorized in these controllers.
+    'api/v1/scheduled_actions' => %w[create],
+    'api/v1/pipeline_tasks' => %w[create],
     # POST-shaped reads inside the new-conversation flow.
     'api/v1/contact_inboxes' => %w[filter],
     'api/v1/contacts/contact_inboxes' => %w[create]
@@ -66,8 +70,8 @@ RSpec.describe 'API v1 mutating actions permission guard' do
     'api/v1/admin/app_configs' => %w[create destroy test_connection],
     'api/v1/integrations/webhooks' => %w[create],
     'api/v1/pipeline_items' => %w[create update destroy bulk_move move_conversation move_to_stage update_conversation update_custom_fields],
-    'api/v1/pipeline_tasks' => %w[create update destroy move reorder add_subtask cancel complete reopen for_conversation],
-    'api/v1/scheduled_actions' => %w[create update destroy]
+    'api/v1/pipeline_tasks' => %w[update destroy move reorder add_subtask cancel complete reopen for_conversation],
+    'api/v1/scheduled_actions' => %w[update destroy]
   }.freeze
 
   def service_authenticated?(controller_class)
