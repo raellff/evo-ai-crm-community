@@ -18,18 +18,15 @@ RSpec.describe 'require_permissions catalog conformance' do
 
   # Pre-existing keys wired in controllers that the auth catalog does not
   # define — real conformance gaps surfaced by this guard, kept visible as
-  # DEBT instead of silently passing. A user is denied these actions unless
-  # the key is added to the catalog (or the controller is corrected to an
-  # existing key). Shrink this list, never grow it: a NEW off-catalog key
-  # fails the conformance example below.
-  #   conversations.export  -> ConversationsController#transcript (catalog has
-  #                            conversations.transcript, not .export)
+  # DEBT instead of silently passing. Closing any of these requires ADDING the
+  # resource/action to the auth catalog SSOT (escalated to a human); they are
+  # not typos of an existing key. Shrink this list, never grow it: a NEW
+  # off-catalog key fails the conformance example below.
   #   dashboard.read        -> DashboardController#customer (no `dashboard`
   #                            resource in the catalog)
   #   reports.create/update/delete -> api/v2 ReportsController (catalog `reports`
   #                            defines read/export/create_custom only)
   KNOWN_OFF_CATALOG_KEYS = %w[
-    conversations.export
     dashboard.read
     reports.create
     reports.update

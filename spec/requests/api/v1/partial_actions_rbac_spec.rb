@@ -119,6 +119,26 @@ RSpec.describe 'Partially mapped write actions RBAC', type: :request do
     end
   end
 
+  describe 'POST /api/v1/conversations/:id/transcript' do
+    it 'denies a holder of only conversations.read' do
+      grant_permissions('conversations.read')
+
+      post "/api/v1/conversations/#{conversation.display_id}/transcript",
+           params: { email: 'agent@example.com' }, as: :json
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it 'schedules the transcript for a holder of conversations.transcript' do
+      grant_permissions('conversations.read', 'conversations.transcript')
+
+      post "/api/v1/conversations/#{conversation.display_id}/transcript",
+           params: { email: 'agent@example.com' }, as: :json
+
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
   describe 'POST /api/v1/oauth/applications/:id/regenerate_secret' do
     let(:application) do
       OauthApplication.create!(name: "App #{SecureRandom.hex(3)}", redirect_uri: 'https://oauth.example.com/cb')

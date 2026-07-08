@@ -19,7 +19,7 @@ class Api::V1::ConversationsController < Api::V1::BaseController
     unpin: 'conversations.update',
     archive: 'conversations.update',
     unarchive: 'conversations.update',
-    transcript: 'conversations.export',
+    transcript: 'conversations.transcript',
     email_team: 'conversations.update',
     available_for_pipeline: 'conversations.read',
     unread_count: 'conversations.read',
