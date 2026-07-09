@@ -19,10 +19,14 @@ development:
   password: "<%= ENV.fetch('POSTGRES_PASSWORD', '') %>"
 
 test:
-  <<: *default
+  adapter: postgresql
+  encoding: unicode
+  host: <%= ENV.fetch('POSTGRES_HOST', '127.0.0.1') %>
+  port: <%= ENV.fetch('POSTGRES_PORT', '5432') %>
   database: "<%= ENV.fetch('POSTGRES_DATABASE', 'evolution_test') %>"
   username: "<%= ENV.fetch('POSTGRES_USERNAME', 'postgres') %>"
   password: "<%= ENV.fetch('POSTGRES_PASSWORD', '') %>"
+  pool: 5
 
 staging:
   <<: *default

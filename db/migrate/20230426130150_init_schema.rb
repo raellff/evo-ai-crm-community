@@ -40,6 +40,7 @@ class InitSchema < ActiveRecord::Migration[6.1]
       t.integer "text_segmentation_min_size", default: 50
       t.decimal "delay_per_character", precision: 8, scale: 2, default: "50.0"
       t.integer "debounce_time", default: 5, null: false
+      t.uuid "account_id"
     end
 
     create_table "alembic_version", primary_key: "version_num", id: { type: :string, limit: 32 }, force: :cascade do |t|
@@ -344,6 +345,7 @@ class InitSchema < ActiveRecord::Migration[6.1]
         t.string "location", default: ""
         t.string "country_code", default: ""
         t.boolean "blocked", default: false, null: false
+        t.uuid "account_id"
         t.index ["blocked"], name: "index_contacts_on_blocked"
         t.index ["email"], name: "uniq_email_per_account_contact", unique: true
         t.index ["identifier"], name: "uniq_identifier_per_account_contact", unique: true
@@ -387,6 +389,7 @@ class InitSchema < ActiveRecord::Migration[6.1]
       t.datetime "waiting_since"
       t.text "cached_label_list"
       t.uuid "sla_policy_id"
+      t.uuid "account_id"
       t.index ["assignee_id", "status", "last_activity_at"], name: "index_conversations_on_assignee_status_last_activity", order: { last_activity_at: "DESC NULLS LAST" }
       t.index ["assignee_id"], name: "index_conversations_on_assignee_id"
       t.index ["contact_id"], name: "index_conversations_on_contact_id"
@@ -519,6 +522,7 @@ class InitSchema < ActiveRecord::Migration[6.1]
       t.jsonb "csat_config", default: {}
       t.integer "sender_name_type", default: 0, null: false
       t.string "business_name"
+      t.uuid "account_id"
       t.index ["channel_id", "channel_type"], name: "index_inboxes_on_channel_id_and_channel_type"
       t.index ["portal_id"], name: "index_inboxes_on_portal_id"
     end
@@ -553,6 +557,7 @@ class InitSchema < ActiveRecord::Migration[6.1]
         t.boolean "show_on_sidebar"
         t.datetime "created_at", precision: nil, null: false
         t.datetime "updated_at", precision: nil, null: false
+        t.uuid "account_id"
         t.index ["title"], name: "index_labels_on_title", unique: true
       end
     end
@@ -597,6 +602,7 @@ class InitSchema < ActiveRecord::Migration[6.1]
       t.text "processed_message_content"
       t.float "sentiment_score", default: 0.0
       t.integer "sentiment", default: 0, null: false
+      t.uuid "account_id"
       t.index "content", name: "index_messages_on_content", opclass: :gin_trgm_ops, using: :gin
       t.index ["created_at"], name: "index_messages_on_created_at"
       t.index ["inbox_id", "content_type", "created_at"], name: "index_messages_for_type_date_inbox"
@@ -857,6 +863,7 @@ class InitSchema < ActiveRecord::Migration[6.1]
       t.boolean "allow_auto_assign", default: true
       t.datetime "created_at", precision: nil, null: false
       t.datetime "updated_at", precision: nil, null: false
+      t.uuid "account_id"
       t.index ["name"], name: "index_teams_on_name", unique: true
     end
 

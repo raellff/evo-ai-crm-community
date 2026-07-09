@@ -24,18 +24,27 @@
 #  working_hours_enabled         :boolean          default(FALSE)
 #  created_at                    :datetime         not null
 #  updated_at                    :datetime         not null
+#  account_id                    :uuid
 #  channel_id                    :uuid             not null
 #
 # Indexes
 #
+#  index_inboxes_on_account_id                   (account_id)
 #  index_inboxes_on_channel_id_and_channel_type  (channel_id,channel_type)
 #  index_inboxes_on_default_conversation_status  (default_conversation_status)
+#
+# Foreign Keys
+#
+#  fk_rails_...  (account_id => accounts.id)
 #
 class Inbox < ApplicationRecord
   include Reportable
   include Avatarable
   include OutOfOffisable
   include InstanceNameSanitizable
+  include AccountScoped
+
+  belongs_to :account, optional: true
 
   # Not allowing characters:
   validates :name, presence: true

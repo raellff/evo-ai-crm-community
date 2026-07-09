@@ -3,6 +3,10 @@
 require 'rails_helper'
 
 RSpec.describe Team, type: :model do
+  describe 'associations' do
+    it { should belong_to(:account).optional(true) }
+  end
+
   describe 'name casing preservation' do
     it 'preserves mixed-case name on create' do
       team = Team.create!(name: 'Marketing Team')

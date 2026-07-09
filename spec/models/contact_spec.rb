@@ -3,6 +3,10 @@
 require 'rails_helper'
 
 RSpec.describe Contact, type: :model do
+  describe 'associations' do
+    it { should belong_to(:account).optional(true) }
+  end
+
   let(:person_contact)  { Contact.create!(name: 'Alice', email: 'alice@example.com', type: 'person') }
   let(:company_contact) { Contact.create!(name: 'Acme Corp', type: 'company') }
   let(:group_contact)   { Contact.create!(name: 'Almoço BH', identifier: '12345-9876@g.us', type: 'group') }

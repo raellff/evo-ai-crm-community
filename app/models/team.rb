@@ -8,19 +8,29 @@
 #  name              :string           not null
 #  created_at        :datetime         not null
 #  updated_at        :datetime         not null
+#  account_id        :uuid
 #
 # Indexes
 #
-#  index_teams_on_name  (name) UNIQUE
+#  index_teams_on_account_id  (account_id)
+#  index_teams_on_name        (name) UNIQUE
+#
+# Foreign Keys
+#
+#  fk_rails_...  (account_id => accounts.id)
 #
 class Team < ApplicationRecord
+  include AccountScoped
+
+  belongs_to :account, optional: true
+
   has_many :team_members, dependent: :destroy_async
   has_many :members, through: :team_members, source: :user
   has_many :conversations, dependent: :nullify
 
   validates :name,
             presence: { message: I18n.t('errors.validations.presence') },
-            uniqueness: { case_sensitive: false },
+            uniqueness: { case_sensitive: false, scope: :account_id },
             length: { maximum: 255 }
   validates :description, length: { maximum: 500 }
 

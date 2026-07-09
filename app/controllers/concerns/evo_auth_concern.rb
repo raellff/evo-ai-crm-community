@@ -59,7 +59,8 @@ module EvoAuthConcern
     role_key = user_data.dig('user', 'role', 'key') || user_data.dig('role', 'key')
     Current.evo_role_key = role_key
 
-    Current.account ||= RuntimeConfig.account
+    Current.account = resolve_account(user_data['accounts'])
+    user.update!(account_id: Current.account.id) if Current.account && user.account_id != Current.account.id
 
     # Store tokens for downstream services
     if token_type == 'bearer'
@@ -73,6 +74,25 @@ module EvoAuthConcern
     return nil unless user_data
 
     User.find_by(email: user_data['email']) || User.find_by(id: user_data['id'])
+  end
+
+  # Finds (or lazily creates) the CRM backend's own local mirror of the
+  # Account the auth-service says this token belongs to. See
+  # specs/multi-account-tenancy/04-architecture.md, Decisions 7 and 11.
+  def resolve_account(accounts_data)
+    account_data = accounts_data&.first
+    return nil unless account_data.present? && account_data['id'].present?
+
+    Account.find_by(id: account_data['id']) || Account.create!(
+      id: account_data['id'],
+      name: account_data['name'].presence || 'Account',
+      subdomain: account_data['subdomain'].presence || account_data['id'],
+      support_email: account_data['support_email'],
+      locale: account_data['locale'].presence || 'pt-BR',
+      status: account_data['status'].presence || 'active',
+      settings: account_data['settings'] || {},
+      custom_attributes: account_data['custom_attributes'] || {}
+    )
   end
 
   # Override current_user method to return our authenticated user

@@ -21,20 +21,26 @@
 #  website               :string
 #  created_at            :datetime         not null
 #  updated_at            :datetime         not null
+#  account_id            :uuid
 #  tax_id                :string(14)
 #
 # Indexes
 #
 #  idx_contacts_name_type_resolved                       (name,type,id) WHERE (((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))
 #  idx_contacts_with_identity                            (id) WHERE (((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))
+#  index_contacts_on_account_id                          (account_id)
+#  index_contacts_on_account_id_and_email                (account_id,email) UNIQUE WHERE ((email IS NOT NULL) AND ((email)::text <> ''::text))
+#  index_contacts_on_account_id_and_identifier           (account_id,identifier) UNIQUE WHERE ((identifier IS NOT NULL) AND ((identifier)::text <> ''::text))
+#  index_contacts_on_account_id_and_phone_number         (account_id,phone_number) WHERE ((phone_number IS NOT NULL) AND ((phone_number)::text <> ''::text))
+#  index_contacts_on_account_id_and_tax_id               (account_id,tax_id) UNIQUE WHERE (tax_id IS NOT NULL)
 #  index_contacts_on_blocked                             (blocked)
 #  index_contacts_on_last_activity_at                    (last_activity_at)
 #  index_contacts_on_name_email_phone_number_identifier  (name,email,phone_number,identifier) USING gin
-#  index_contacts_on_phone_number                        (phone_number)
-#  index_contacts_on_tax_id                              (tax_id) UNIQUE WHERE (tax_id IS NOT NULL)
 #  index_contacts_on_type                                (type)
-#  uniq_email_per_account_contact                        (email) UNIQUE
-#  uniq_identifier_per_account_contact                   (identifier) UNIQUE
+#
+# Foreign Keys
+#
+#  fk_rails_...  (account_id => accounts.id)
 #
 class Contact < ApplicationRecord
   include Avatarable
@@ -42,20 +48,23 @@ class Contact < ApplicationRecord
   include Labelable
   include LlmFormattable
   include Wisper::Publisher
+  include AccountScoped
 
   self.inheritance_column = :_type_disabled
   attr_accessor :skip_default_pipeline_assignment
 
+  belongs_to :account, optional: true
+
   TYPES = %w[person company group].freeze
 
   validates :type, presence: true, inclusion: { in: TYPES }
-  validates :email, allow_blank: true, uniqueness: { case_sensitive: false },
+  validates :email, allow_blank: true, uniqueness: { case_sensitive: false, scope: :account_id },
                     format: { with: URI::MailTo::EMAIL_REGEXP, message: I18n.t('errors.contacts.email.invalid') }
-  validates :identifier, allow_blank: true, uniqueness: true
+  validates :identifier, allow_blank: true, uniqueness: { scope: :account_id }
   validates :phone_number,
-            allow_blank: true, uniqueness: true,
+            allow_blank: true, uniqueness: { scope: :account_id },
             format: { with: /\+[1-9]\d{1,14}\z/, message: I18n.t('errors.contacts.phone_number.invalid') }
-  validates :tax_id, allow_blank: true, uniqueness: true, length: { maximum: 14 }
+  validates :tax_id, allow_blank: true, uniqueness: { scope: :account_id }, length: { maximum: 14 }
   validates :website, allow_blank: true, format: { with: URI::DEFAULT_PARSER.make_regexp(%w[http https]), message: 'must be a valid URL' }
   has_many :conversations, dependent: :destroy_async
   has_many :contact_inboxes, dependent: :destroy_async

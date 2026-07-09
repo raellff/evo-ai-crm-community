@@ -4,17 +4,12 @@ class Installation::OnboardingController < ApplicationController
   def index; end
 
   def create
-    begin
-      AccountBuilder.new(
-        account_name: onboarding_params.dig(:user, :company),
-        user_full_name: onboarding_params.dig(:user, :name),
-        email: onboarding_params.dig(:user, :email),
-        user_password: params.dig(:user, :password),
-        confirmed: true
-      ).perform
-    rescue StandardError => e
-      redirect_to '/', flash: { error: e.message } and return
-    end
+    # Installation bootstrap now happens exclusively through the
+    # auth-service's /setup/bootstrap (see SetupBootstrapService), which
+    # creates the user, the real Account, and the superadmin role. This
+    # action is unreachable in practice today (EVOLUTION_INSTALLATION_ONBOARDING
+    # is never set — see ensure_installation_onboarding), but previously
+    # called a nonexistent `AccountBuilder`.
     finish_onboarding
     redirect_to '/'
   end

@@ -9,19 +9,28 @@
 #  title           :string
 #  created_at      :datetime         not null
 #  updated_at      :datetime         not null
+#  account_id      :uuid
 #
 # Indexes
 #
-#  index_labels_on_title  (title) UNIQUE
+#  index_labels_on_account_id  (account_id)
+#  index_labels_on_title       (title) UNIQUE
+#
+# Foreign Keys
+#
+#  fk_rails_...  (account_id => accounts.id)
 #
 class Label < ApplicationRecord
   include RegexHelper
   include Events::Types
+  include AccountScoped
+
+  belongs_to :account, optional: true
 
   validates :title,
             presence: { message: I18n.t('errors.validations.presence') },
             format: { with: UNICODE_CHARACTER_NUMBER_SPACE_HYPHEN_UNDERSCORE, allow_blank: true },
-            uniqueness: true
+            uniqueness: { scope: :account_id }
 
   after_create_commit :dispatch_create_event
   after_update_commit :update_associated_models, :dispatch_update_event

@@ -5,6 +5,10 @@ require 'rails_helper'
 RSpec.describe Message do
   include ActiveSupport::Testing::TimeHelpers
 
+  describe 'associations' do
+    it { should belong_to(:account).optional(true) }
+  end
+
   describe '#refresh_conversation_activity!' do
     it 'uses current time when requested even if created_at is older' do
       conversation = double('Conversation', id: 'conv_1', class: Conversation)

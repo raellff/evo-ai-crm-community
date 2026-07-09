@@ -19,6 +19,7 @@
 #  waiting_since          :datetime
 #  created_at             :datetime         not null
 #  updated_at             :datetime         not null
+#  account_id             :uuid
 #  assignee_id            :uuid
 #  contact_id             :uuid
 #  contact_inbox_id       :uuid
@@ -29,6 +30,7 @@
 # Indexes
 #
 #  conv_inbid_stat_asgnid_idx                            (inbox_id,status,assignee_id)
+#  index_conversations_on_account_id                     (account_id)
 #  index_conversations_on_assignee_id                    (assignee_id)
 #  index_conversations_on_assignee_status_last_activity  (assignee_id,status,last_activity_at DESC NULLS LAST)
 #  index_conversations_on_contact_id                     (contact_id)
@@ -45,6 +47,10 @@
 #  index_conversations_on_uuid                           (uuid) UNIQUE
 #  index_conversations_on_waiting_since                  (waiting_since)
 #
+# Foreign Keys
+#
+#  fk_rails_...  (account_id => accounts.id)
+#
 class Conversation < ApplicationRecord
   include Labelable
   include LlmFormattable
@@ -56,6 +62,9 @@ class Conversation < ApplicationRecord
   include PushDataHelper
   include ConversationMuteHelpers
   include Wisper::Publisher
+  include AccountScoped
+
+  belongs_to :account, optional: true
 
   validates :inbox_id, presence: true
   validates :contact_id, presence: true
