@@ -76,23 +76,65 @@ module EvoAuthConcern
     User.find_by(email: user_data['email']) || User.find_by(id: user_data['id'])
   end
 
-  # Finds (or lazily creates) the CRM backend's own local mirror of the
-  # Account the auth-service says this token belongs to. See
-  # specs/multi-account-tenancy/04-architecture.md, Decisions 7 and 11.
+  # Finds (or creates) the CRM backend's own local mirror of the Account the
+  # auth-service says this token belongs to, and refreshes it from the
+  # auth-service's response on every request - including its feature
+  # overrides (see specs/account-feature-toggles). See
+  # specs/multi-account-tenancy/04-architecture.md, Decisions 7 and 11, and
+  # specs/account-feature-toggles/04-architecture.md, Decision B2.
   def resolve_account(accounts_data)
     account_data = accounts_data&.first
     return nil unless account_data.present? && account_data['id'].present?
 
-    Account.find_by(id: account_data['id']) || Account.create!(
-      id: account_data['id'],
+    account = Account.find_or_initialize_by(id: account_data['id'])
+    is_new_account = account.new_record?
+
+    account.assign_attributes(
       name: account_data['name'].presence || 'Account',
-      subdomain: account_data['subdomain'].presence || account_data['id'],
+      subdomain: account_data['subdomain'].presence || account.subdomain || account_data['id'],
       support_email: account_data['support_email'],
       locale: account_data['locale'].presence || 'pt-BR',
       status: account_data['status'].presence || 'active',
       settings: account_data['settings'] || {},
       custom_attributes: account_data['custom_attributes'] || {}
     )
+
+    apply_default_features(account) if is_new_account
+    apply_feature_overrides(account, account_data['features'])
+
+    account.save!
+    account
+  end
+
+  # A brand-new local Account mirror starts from features.yml's installation
+  # defaults, same as any other Chatwoot-derived account would via
+  # Featurable#enable_default_features - except that callback is a no-op in
+  # this fork (no ACCOUNT_LEVEL_FEATURE_DEFAULTS InstallationConfig exists),
+  # so this is the actual mechanism that applies them.
+  def apply_default_features(account)
+    default_enabled_names = Featurable::FEATURE_LIST.select { |f| f['enabled'] }.pluck('name')
+    account.enable_features(*default_enabled_names)
+  end
+
+  # Applies the auth-service's per-Account feature_overrides onto the local
+  # Featurable bitmask. Unknown names (e.g. a feature this CRM version
+  # doesn't know about yet) are ignored rather than raising - see
+  # specs/account-feature-toggles/04-architecture.md, Decision A3.
+  def apply_feature_overrides(account, overrides)
+    return unless overrides.is_a?(Hash)
+
+    known_names = Featurable::FEATURE_LIST.pluck('name')
+    to_enable = []
+    to_disable = []
+
+    overrides.each do |name, enabled|
+      next unless known_names.include?(name.to_s)
+
+      (ActiveModel::Type::Boolean.new.cast(enabled) ? to_enable : to_disable) << name
+    end
+
+    account.enable_features(*to_enable)
+    account.disable_features(*to_disable)
   end
 
   # Override current_user method to return our authenticated user

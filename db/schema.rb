@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_06_000000) do
+ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -46,6 +46,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_06_000000) do
     t.jsonb "custom_attributes", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "feature_flags", default: 0, null: false
     t.index ["status"], name: "index_accounts_on_status"
     t.index ["subdomain"], name: "index_accounts_on_subdomain", unique: true
   end
@@ -1145,10 +1146,12 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_06_000000) do
     t.datetime "updated_at", precision: nil, null: false
     t.jsonb "custom_fields", default: {}, null: false
     t.boolean "is_default", default: false, null: false
+    t.uuid "account_id"
+    t.index ["account_id", "is_default"], name: "index_pipelines_on_account_id_and_is_default_unique", unique: true, where: "(is_default = true)"
+    t.index ["account_id", "name"], name: "index_pipelines_on_account_id_and_name", unique: true
+    t.index ["account_id"], name: "index_pipelines_on_account_id"
     t.index ["created_by_id"], name: "index_pipelines_on_created_by_id"
     t.index ["custom_fields"], name: "index_pipelines_on_custom_fields", using: :gin
-    t.index ["is_default"], name: "index_pipelines_on_is_default_unique", where: "(is_default = true)"
-    t.index ["name"], name: "index_pipelines_on_name", unique: true
   end
 
   create_table "plan_features", id: :uuid, default: nil, force: :cascade do |t|
@@ -1561,6 +1564,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_06_000000) do
   add_foreign_key "pipeline_service_definitions", "pipelines"
   add_foreign_key "pipeline_tasks", "pipeline_items"
   add_foreign_key "pipeline_tasks", "pipeline_tasks", column: "parent_task_id"
+  add_foreign_key "pipelines", "accounts"
   add_foreign_key "plan_features", "features", name: "plan_features_feature_id_fkey"
   add_foreign_key "plan_features", "plans", name: "plan_features_plan_id_fkey"
   add_foreign_key "product_variants", "products", on_delete: :cascade

@@ -3,36 +3,33 @@
 # Table name: pipelines
 #
 #  id            :uuid             not null, primary key
-#  config        :jsonb
-#  custom_fields :jsonb            not null
-#  description   :text
-#  is_active     :boolean          default(TRUE), not null
-#  is_default    :boolean          default(FALSE), not null
+#  created_by_id :uuid             not null
 #  name          :string           not null
+#  description   :text
 #  pipeline_type :string           default("custom"), not null
 #  visibility    :integer          default("private")
+#  config        :jsonb
+#  is_active     :boolean          default(TRUE), not null
 #  created_at    :datetime         not null
 #  updated_at    :datetime         not null
-#  created_by_id :uuid             not null
-#
-# Indexes
-#
-#  index_pipelines_on_created_by_id      (created_by_id)
-#  index_pipelines_on_custom_fields      (custom_fields) USING gin
-#  index_pipelines_on_is_default_unique  (is_default) WHERE (is_default = true)
-#  index_pipelines_on_name               (name) UNIQUE
+#  custom_fields :jsonb            not null
+#  is_default    :boolean          default(FALSE), not null
+#  account_id    :uuid
 #
 class Pipeline < ApplicationRecord
+  include AccountScoped
+
   VALID_TYPES = %w[sales support onboarding custom marketing].freeze
 
   belongs_to :created_by, class_name: 'User'
+  belongs_to :account, optional: true
 
   has_many :pipeline_stages, -> { order(:position) }, dependent: :destroy, inverse_of: :pipeline
   has_many :pipeline_items, dependent: :destroy
   has_many :conversations, through: :pipeline_items
   has_many :pipeline_service_definitions, dependent: :nullify
 
-  validates :name, presence: true, uniqueness: true
+  validates :name, presence: true, uniqueness: { scope: :account_id }
   validates :pipeline_type, inclusion: { in: VALID_TYPES }
 
   enum visibility: { private: 0, team: 1, public: 2 }, _prefix: :visibility

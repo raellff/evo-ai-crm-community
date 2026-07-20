@@ -3,6 +3,7 @@ class Api::BaseController < ApplicationController
   include EvoAuthConcern
   include ServiceTokenAuthConcern
   include EvoPermissionConcern
+  include FeatureGateConcern
   include ApiResponseHelper
 
   before_action :authenticate_request!

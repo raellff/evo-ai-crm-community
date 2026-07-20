@@ -151,3 +151,6 @@
 - name: custom_domains_beta
   display_name: Custom Domains Beta Access
   enabled: false
+- name: ai_agents
+  display_name: AI Agents
+  enabled: true

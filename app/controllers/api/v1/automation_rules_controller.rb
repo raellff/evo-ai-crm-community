@@ -1,6 +1,8 @@
 class Api::V1::AutomationRulesController < Api::V1::BaseController
   include Api::V1::ResourceLimitsHelper
 
+  require_feature :automations
+
   require_permissions({
     index: 'automation_rules.read',
     show: 'automation_rules.read',

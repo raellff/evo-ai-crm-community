@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Api::V1::AiAgentsController < Api::V1::BaseController
+  require_feature :ai_agents
 
   def index
     params_hash = {

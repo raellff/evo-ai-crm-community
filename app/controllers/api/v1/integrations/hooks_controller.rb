@@ -1,4 +1,6 @@
 class Api::V1::Integrations::HooksController < Api::V1::BaseController
+  require_feature :integrations
+
   require_permissions({
     create: 'integrations.create',
     update: 'integrations.update',

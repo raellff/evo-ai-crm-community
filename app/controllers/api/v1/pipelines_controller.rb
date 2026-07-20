@@ -1,6 +1,8 @@
 class Api::V1::PipelinesController < Api::V1::BaseController
   include Api::V1::ResourceLimitsHelper
 
+  require_feature :pipelines
+
   require_permissions({
     index: 'pipelines.read',
     show: 'pipelines.read',
