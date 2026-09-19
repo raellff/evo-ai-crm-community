@@ -7,21 +7,7 @@ class Public::Leads::CreationService
   end
 
   def perform
-    ActiveRecord::Base.transaction do
-      validate_required_params!
-      validate_pipeline_and_stage!
-
-      @contact = find_or_create_contact
-      @pipeline_item = create_pipeline_item
-
-      publish_events
-
-      {
-        success: true,
-        contact: @contact,
-        pipeline_item: @pipeline_item
-      }
-    end
+    ActiveRecord::Base.transaction { create_lead! }
   rescue ActiveRecord::RecordInvalid => e
     Rails.logger.error "Public Leads API: Validation error - #{e.message}"
     { success: false, error: e.record.errors.full_messages.join(', '), errors: e.record.errors.full_messages }
@@ -32,6 +18,20 @@ class Public::Leads::CreationService
   end
 
   private
+
+  def create_lead!
+    validate_required_params!
+    validate_pipeline_and_stage!
+    log_archived_destination
+
+    @contact = find_or_create_contact
+    stamp_capture_form_on_contact
+    @pipeline_item = create_pipeline_item
+
+    publish_events
+
+    { success: true, contact: @contact, pipeline_item: @pipeline_item }
+  end
 
   def validate_required_params!
     # Validate contact required fields
@@ -55,6 +55,33 @@ class Public::Leads::CreationService
     end
 
     raise StandardError, @errors.join(', ') if @errors.any?
+  end
+
+  CAPTURE_FORMS_ATTRIBUTE = 'capture_form_slugs'
+
+  # The capture proceeds on an archived pipeline: the lead stays visible in the form's
+  # Leads tab, which does not filter by is_active, and the contact is a normal contact.
+  # Logged so the proceed is observable — see EVO-2200 for the decision.
+  def log_archived_destination
+    return if @pipeline.is_active
+
+    Rails.logger.warn(
+      "Public Leads API: capturing into archived pipeline #{@pipeline.id} (#{@pipeline.name})"
+    )
+  end
+
+  # form_slug lives only in the pipeline item's custom_fields, and deleting a kanban card
+  # is a hard delete — that would erase the form attribution for good. Mirroring it on the
+  # contact keeps the link alive. Stored as a list: the same person may fill several forms.
+  def stamp_capture_form_on_contact
+    slug = metadata_params[:form_slug].presence || metadata_params['form_slug'].presence
+    return if slug.blank?
+
+    current = Array(@contact.custom_attributes&.dig(CAPTURE_FORMS_ATTRIBUTE))
+    return if current.include?(slug)
+
+    attributes = @contact.custom_attributes || {}
+    @contact.update!(custom_attributes: attributes.merge(CAPTURE_FORMS_ATTRIBUTE => current + [slug]))
   end
 
   def validate_pipeline_and_stage!
@@ -94,6 +121,22 @@ class Public::Leads::CreationService
         update_attrs[:additional_attributes] = contact.additional_attributes
       end
 
+      # Merge contact custom attributes if provided (B14.06 context-driven mapping).
+      # This path is anonymous (public form/leads API), and a contact is matched
+      # purely by email — so anyone who knows an existing contact's email could
+      # otherwise clobber its attributes. Write additively: only fill keys that
+      # are currently blank, never overwrite values the contact already holds.
+      if contact_params[:custom_attributes].present?
+        contact.custom_attributes ||= {}
+        additive = contact_params[:custom_attributes].to_h.reject do |key, _|
+          contact.custom_attributes[key].present?
+        end
+        if additive.any?
+          contact.custom_attributes.merge!(additive)
+          update_attrs[:custom_attributes] = contact.custom_attributes
+        end
+      end
+
       contact.update!(update_attrs) if update_attrs.any?
 
       Rails.logger.info "Public Leads API: Found existing contact #{contact.id} for email #{contact_params[:email]}"
@@ -109,7 +152,8 @@ class Public::Leads::CreationService
         name: contact_params[:name],
         email: contact_params[:email],
         phone_number: normalize_phone_number(contact_params[:phone_number]),
-        additional_attributes: {}
+        additional_attributes: {},
+        custom_attributes: contact_params[:custom_attributes].presence&.to_h || {}
       }
 
       # Add company to additional_attributes if provided
@@ -173,12 +217,14 @@ class Public::Leads::CreationService
   def normalize_phone_number(phone)
     return nil if phone.blank?
 
-    # Normalize phone to E.164 format
-    phone = phone.to_s.strip.gsub(/[^\d+]/, '') # Remove non-digit/non-plus characters
-    phone = "+#{phone}" unless phone.start_with?('+')
+    # Canonicalize to the same form WhatsApp resolves to (Brazilian nono dígito,
+    # MX/AR extra digit) via the shared normalizer — a faithful port of Evolution
+    # API's createJid. This keeps the leads API in lockstep with the inbound
+    # WhatsApp path so the same person never lands as two contacts.
+    phone = Whatsapp::PhoneNumberNormalizer.to_e164(phone)
 
     # Validate E.164 format: +[1-9]\d{1,14}
-    unless phone.match?(/\A\+[1-9]\d{1,14}\z/)
+    unless phone.present? && phone.match?(/\A\+[1-9]\d{1,14}\z/)
       raise StandardError, "Phone number must be in E.164 format (+[country][number]). Example: +5511999998888"
     end
 

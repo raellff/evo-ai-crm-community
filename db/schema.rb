@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
+ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -136,6 +136,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.decimal "delay_per_character", precision: 8, scale: 2, default: "50.0"
     t.integer "debounce_time", default: 5, null: false
     t.uuid "account_id"
+    t.uuid "credential_id"
     t.index ["account_id"], name: "index_agent_bots_on_account_id"
   end
 
@@ -282,6 +283,19 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.index ["line_channel_id"], name: "index_channel_line_on_line_channel_id", unique: true
   end
 
+  create_table "channel_sendgrid", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.text "api_key_encrypted", null: false
+    t.string "from_email", null: false
+    t.string "from_name"
+    t.string "reply_to"
+    t.string "sender_domain"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "webhook_registration_status", default: "pending", null: false
+    t.text "email_signature"
+    t.index ["from_email"], name: "index_channel_sendgrid_on_from_email"
+  end
+
   create_table "channel_sms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "phone_number", null: false
     t.string "provider", default: "default"
@@ -353,6 +367,22 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.index ["phone_number"], name: "index_channel_whatsapp_on_phone_number", unique: true
   end
 
+  create_table "chat_pages", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "slug", limit: 255, null: false
+    t.string "title", limit: 255
+    t.text "description"
+    t.jsonb "appearance", default: {}, null: false
+    t.string "website_token", null: false
+    t.boolean "published", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["published"], name: "index_chat_pages_on_published"
+    t.index ["slug"], name: "index_chat_pages_on_slug", unique: true
+    t.index ["website_token"], name: "index_chat_pages_on_website_token"
+    t.check_constraint "slug::text <> ''::text", name: "chat_pages_slug_not_empty"
+    t.check_constraint "website_token::text <> ''::text", name: "chat_pages_website_token_not_empty"
+  end
+
   create_table "contact_companies", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "contact_id", null: false
     t.uuid "company_id", null: false
@@ -404,12 +434,15 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.string "website"
     t.string "industry"
     t.uuid "account_id"
+    t.boolean "email_suppressed", default: false, null: false
+    t.string "email_suppression_reason"
     t.index ["account_id", "email"], name: "index_contacts_on_account_id_and_email", unique: true, where: "((email IS NOT NULL) AND ((email)::text <> ''::text))"
     t.index ["account_id", "identifier"], name: "index_contacts_on_account_id_and_identifier", unique: true, where: "((identifier IS NOT NULL) AND ((identifier)::text <> ''::text))"
     t.index ["account_id", "phone_number"], name: "index_contacts_on_account_id_and_phone_number", where: "((phone_number IS NOT NULL) AND ((phone_number)::text <> ''::text))"
     t.index ["account_id", "tax_id"], name: "index_contacts_on_account_id_and_tax_id", unique: true, where: "(tax_id IS NOT NULL)"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["blocked"], name: "index_contacts_on_blocked"
+    t.index ["custom_attributes"], name: "index_contacts_on_custom_attributes", opclass: :jsonb_path_ops, using: :gin
     t.index ["id"], name: "idx_contacts_with_identity", where: "(((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))"
     t.index ["last_activity_at"], name: "index_contacts_on_last_activity_at", order: "DESC NULLS LAST"
     t.index ["name", "email", "phone_number", "identifier"], name: "index_contacts_on_name_email_phone_number_identifier", opclass: :gin_trgm_ops, using: :gin
@@ -451,6 +484,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.datetime "waiting_since", precision: nil
     t.text "cached_label_list"
     t.uuid "account_id"
+    t.integer "source", default: 0, null: false
     t.index ["account_id"], name: "index_conversations_on_account_id"
     t.index ["assignee_id", "status", "last_activity_at"], name: "index_conversations_on_assignee_status_last_activity", order: { last_activity_at: "DESC NULLS LAST" }
     t.index ["assignee_id"], name: "index_conversations_on_assignee_id"
@@ -468,6 +502,27 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.index ["team_id"], name: "index_conversations_on_team_id"
     t.index ["uuid"], name: "index_conversations_on_uuid", unique: true
     t.index ["waiting_since"], name: "index_conversations_on_waiting_since"
+  end
+
+  create_table "crm_forms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "name", limit: 255, null: false
+    t.string "slug", limit: 255, null: false
+    t.string "title", limit: 255
+    t.text "description"
+    t.jsonb "appearance", default: {}, null: false
+    t.jsonb "fields", default: [], null: false
+    t.jsonb "routing_rules", default: [], null: false
+    t.uuid "default_pipeline_id", null: false
+    t.uuid "default_stage_id"
+    t.boolean "published", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["fields"], name: "index_crm_forms_on_fields", using: :gin
+    t.index ["published"], name: "index_crm_forms_on_published"
+    t.index ["routing_rules"], name: "index_crm_forms_on_routing_rules", using: :gin
+    t.index ["slug"], name: "index_crm_forms_on_slug", unique: true
+    t.check_constraint "name::text <> ''::text", name: "crm_forms_name_not_empty"
+    t.check_constraint "slug::text <> ''::text", name: "crm_forms_slug_not_empty"
   end
 
   create_table "csat_survey_responses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -812,6 +867,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.string "display_name"
     t.string "default_conversation_status"
     t.uuid "account_id"
+    t.uuid "greeting_message_template_id"
+    t.uuid "out_of_office_message_template_id"
     t.index ["account_id"], name: "index_inboxes_on_account_id"
     t.index ["channel_id", "channel_type"], name: "index_inboxes_on_channel_id_and_channel_type"
     t.index ["default_conversation_status"], name: "index_inboxes_on_default_conversation_status"
@@ -890,8 +947,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
   end
 
   create_table "message_templates", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.string "channel_type", null: false
-    t.uuid "channel_id", null: false
+    t.string "channel_type"
+    t.uuid "channel_id"
     t.string "name", null: false
     t.text "content", null: false
     t.string "language", default: "pt_BR"
@@ -906,10 +963,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.boolean "active", default: true
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "external_legacy_id"
     t.index ["category"], name: "idx_templates_by_category"
     t.index ["channel_type", "channel_id", "active"], name: "idx_templates_active_by_channel"
     t.index ["channel_type", "channel_id"], name: "index_message_templates_on_channel"
+    t.index ["external_legacy_id"], name: "idx_message_templates_external_legacy_id", unique: true, where: "(external_legacy_id IS NOT NULL)"
     t.index ["name", "channel_type", "channel_id"], name: "idx_templates_lookup"
+    t.index ["name"], name: "idx_message_templates_global_name", unique: true, where: "(channel_id IS NULL)"
     t.index ["name"], name: "idx_templates_by_name"
     t.index ["template_type"], name: "idx_templates_by_type"
   end
@@ -934,6 +994,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.float "sentiment_score", default: 0.0
     t.integer "sentiment", default: 0, null: false
     t.uuid "account_id"
+    t.integer "source", default: 0, null: false
     t.index ["account_id"], name: "index_messages_on_account_id"
     t.index ["content"], name: "index_messages_on_content", opclass: :gin_trgm_ops, using: :gin
     t.index ["conversation_id", "created_at"], name: "idx_messages_conv_created_desc", order: { created_at: :desc }
@@ -1069,6 +1130,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.uuid "contact_id"
+    t.index "(((custom_fields -> 'lead_metadata'::text) ->> 'form_slug'::text))", name: "index_pipeline_items_on_lead_form_slug", where: "(((custom_fields -> 'lead_metadata'::text) ->> 'form_slug'::text) IS NOT NULL)"
+    t.index "pipeline_id, (((custom_fields -> 'purchase'::text) ->> 'provider'::text)), (((custom_fields -> 'purchase'::text) ->> 'purchase_id'::text))", name: "index_pipeline_items_on_purchase_identity", unique: true, where: "(((custom_fields -> 'purchase'::text) ->> 'purchase_id'::text) IS NOT NULL)"
     t.index ["contact_id", "pipeline_id"], name: "idx_pipeline_items_active_contact_per_pipeline", unique: true, where: "((conversation_id IS NULL) AND (completed_at IS NULL))"
     t.index ["contact_id"], name: "index_pipeline_items_on_contact_id"
     t.index ["conversation_id", "pipeline_id"], name: "idx_pipeline_items_active_conversation_per_pipeline", unique: true, where: "((conversation_id IS NOT NULL) AND (completed_at IS NULL))"
@@ -1132,6 +1195,15 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.index ["pipeline_item_id", "status"], name: "index_pipeline_tasks_on_pipeline_item_id_and_status"
     t.index ["pipeline_item_id"], name: "index_pipeline_tasks_on_pipeline_item_id"
     t.index ["status", "due_date"], name: "index_pipeline_tasks_on_pending_status_and_due_date", where: "(status = 0)"
+  end
+
+  create_table "pipeline_teams", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_id", null: false
+    t.uuid "team_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["pipeline_id", "team_id"], name: "index_pipeline_teams_on_pipeline_id_and_team_id", unique: true
+    t.index ["team_id"], name: "index_pipeline_teams_on_team_id"
   end
 
   create_table "pipelines", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1361,6 +1433,22 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.index ["user_id"], name: "index_setup_survey_responses_on_user_id", unique: true
   end
 
+  create_table "stage_inactivity_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_item_id", null: false
+    t.uuid "pipeline_stage_id", null: false
+    t.string "rule_id", null: false
+    t.string "base"
+    t.string "action"
+    t.datetime "executed_at", null: false
+    t.jsonb "action_config", default: {}
+    t.text "message_sent"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["executed_at"], name: "index_stage_inactivity_executions_on_executed_at"
+    t.index ["pipeline_item_id", "rule_id"], name: "index_stage_inactivity_on_item_and_rule", unique: true
+    t.index ["pipeline_item_id"], name: "index_stage_inactivity_executions_on_pipeline_item_id"
+  end
+
   create_table "stage_movements", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "pipeline_item_id", null: false
     t.uuid "from_stage_id"
@@ -1440,13 +1528,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
     t.index ["user_id"], name: "index_user_roles_on_user_id"
   end
 
-  create_table "user_tours", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+  create_table "user_tours", force: :cascade do |t|
     t.uuid "user_id", null: false
     t.string "tour_key", null: false
-    t.datetime "completed_at", null: false
+    t.string "status", default: "completed", null: false
+    t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.string "status", default: "completed", null: false
     t.index ["user_id", "tour_key"], name: "index_user_tours_on_user_id_and_tour_key", unique: true
     t.index ["user_id"], name: "index_user_tours_on_user_id"
   end
@@ -1537,6 +1625,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
   add_foreign_key "contact_companies", "contacts", column: "company_id"
   add_foreign_key "contacts", "accounts"
   add_foreign_key "conversations", "accounts"
+  add_foreign_key "crm_forms", "pipeline_stages", column: "default_stage_id"
+  add_foreign_key "crm_forms", "pipelines", column: "default_pipeline_id"
   add_foreign_key "data_privacy_consents", "users"
   add_foreign_key "evo_agent_processor_execution_metrics", "evo_core_agents", column: "agent_id", name: "evo_agent_processor_execution_metrics_agent_id_fkey", on_delete: :cascade
   add_foreign_key "evo_ai_agent_processor_execution_metrics", "evo_core_agents", column: "agent_id", name: "evo_ai_agent_processor_execution_metrics_agent_id_fkey", on_delete: :cascade
@@ -1564,6 +1654,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
   add_foreign_key "pipeline_service_definitions", "pipelines"
   add_foreign_key "pipeline_tasks", "pipeline_items"
   add_foreign_key "pipeline_tasks", "pipeline_tasks", column: "parent_task_id"
+  add_foreign_key "pipeline_teams", "pipelines"
+  add_foreign_key "pipeline_teams", "teams"
   add_foreign_key "pipelines", "accounts"
   add_foreign_key "plan_features", "features", name: "plan_features_feature_id_fkey"
   add_foreign_key "plan_features", "plans", name: "plan_features_plan_id_fkey"
@@ -1574,6 +1666,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_19_000003) do
   add_foreign_key "scheduled_actions", "contacts", on_delete: :cascade
   add_foreign_key "scheduled_actions", "conversations", on_delete: :cascade
   add_foreign_key "setup_survey_responses", "users"
+  add_foreign_key "stage_inactivity_executions", "pipeline_items", on_delete: :cascade
   add_foreign_key "stage_movements", "pipeline_items"
   add_foreign_key "stage_movements", "pipeline_stages", column: "from_stage_id"
   add_foreign_key "stage_movements", "pipeline_stages", column: "to_stage_id"

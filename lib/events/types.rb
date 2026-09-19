@@ -19,6 +19,7 @@ module Events::Types
   CONVERSATION_UPDATED = 'conversation.updated'
   CONVERSATION_READ = 'conversation.read'
   CONVERSATION_BOT_HANDOFF = 'conversation.bot_handoff'
+  CONVERSATION_HUMAN_HANDOFF = 'conversation.human_handoff'
   # FIXME: deprecate the opened and resolved events in future in favor of status changed event.
   CONVERSATION_OPENED = 'conversation.opened'
   CONVERSATION_RESOLVED = 'conversation.resolved'
@@ -49,6 +50,10 @@ module Events::Types
   # contact events
   INBOX_CREATED = 'inbox.created'
   INBOX_UPDATED = 'inbox.updated'
+
+  # Its own event rather than INBOX_UPDATED, which sits behind
+  # ENV['ENABLE_INBOX_EVENTS'] and fires on ANY inbox update.
+  HUB_CHANNEL_CONNECTION_CHANGED = 'hub_channel.connection_changed'
 
   # notification events
   NOTIFICATION_CREATED = 'notification.created'

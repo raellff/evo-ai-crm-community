@@ -75,13 +75,32 @@ class Conversation < ApplicationRecord
   validates :uuid, uniqueness: true
   validate :validate_referer_url
 
-  enum status: { open: 0, resolved: 1, pending: 2, snoozed: 3 }
-  enum priority: { low: 0, medium: 1, high: 2, urgent: 3 }
+  enum :status, { open: 0, resolved: 1, pending: 2, snoozed: 3 }
+  enum :priority, { low: 0, medium: 1, high: 2, urgent: 3 }
+  # Explicit attribute keeps the model bootable when the source column has not been
+  # migrated yet (EVO-1999 deploy scenario: Puma boots before db:migrate runs).
+  # Type/default must stay in sync with db/migrate/20260623120000_add_source_to_conversations.rb.
+  attribute :source, :integer, default: 0
+  enum :source, { live: 0, imported: 1 }
 
   scope :unassigned, -> { where(assignee_id: nil) }
   scope :assigned, -> { where.not(assignee_id: nil) }
   scope :assigned_to, ->(agent) { where(assignee_id: agent.id) }
   scope :unattended, -> { where(first_reply_created_at: nil).or(where.not(waiting_since: nil)) }
+  # Awaiting a human reply. Archived are excluded because the list hides them, so
+  # counting them would promise rows the UI never shows. Not the `unattended` scope:
+  # its first_reply_created_at branch also catches agent-started conversations.
+  scope :unanswered, -> { open.where.not(waiting_since: nil).where("conversations.custom_attributes->>'archived' IS DISTINCT FROM 'true'") }
+  # Conversas com mensagens incoming não lidas pelo agente (espelha
+  # unread_incoming_messages_count > 0): sem agent_last_seen_at = qualquer incoming;
+  # senão, incoming com created_at depois do último seen. Usado pelo chip "Não lidas".
+  scope :unread, lambda {
+    where(
+      'EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id ' \
+      "AND messages.message_type = #{Message.message_types[:incoming]} " \
+      'AND (conversations.agent_last_seen_at IS NULL OR messages.created_at > conversations.agent_last_seen_at))'
+    )
+  }
   scope :resolvable_not_waiting, lambda { |auto_resolve_after|
     return none if auto_resolve_after.to_i.zero?
 
@@ -126,10 +145,10 @@ class Conversation < ApplicationRecord
   before_create :ensure_waiting_since
 
   after_update_commit :execute_after_update_commit_callbacks
-  after_create_commit :notify_conversation_creation
+  after_create_commit :notify_conversation_creation, unless: :imported?
   after_create_commit :load_attributes_created_by_db_triggers
-  after_create_commit :publish_conversation_created
-  after_create_commit :assign_to_default_pipeline
+  after_create_commit :publish_conversation_created, unless: :imported?
+  after_create_commit :assign_to_default_pipeline, unless: :imported?
   after_update_commit :publish_conversation_updated
   after_update_commit :publish_conversation_resolved
   after_destroy_commit :publish_conversation_deleted
@@ -175,7 +194,24 @@ class Conversation < ApplicationRecord
 
   def bot_handoff!
     open!
+    create_bot_handoff_activity
     dispatcher_dispatch(CONVERSATION_BOT_HANDOFF)
+  end
+
+  # Reverse human→bot handoff (EVO-1680). Validates that the inbox has an
+  # active AgentBot and the conversation is currently open; transitions to
+  # pending and clears the assignee so the BotProcessorService picks it up on
+  # the next incoming message. Persists the transition as a timeline activity
+  # and emits CONVERSATION_HUMAN_HANDOFF for downstream listeners.
+  def return_to_bot!
+    raise Conversations::InvalidHandoffError, 'inbox has no agent bot connected' unless inbox.active_bot?
+    raise Conversations::InvalidHandoffError, 'conversation must be open' unless open?
+
+    transaction do
+      update!(status: :pending, assignee_id: nil)
+    end
+    create_human_handoff_activity
+    dispatcher_dispatch(CONVERSATION_HUMAN_HANDOFF)
   end
 
   def unread_messages
@@ -184,6 +220,14 @@ class Conversation < ApplicationRecord
 
   def unread_incoming_messages
     unread_messages.incoming.last(10)
+  end
+
+  def unread_incoming_messages_count
+    if agent_last_seen_at.blank?
+      messages.incoming.count
+    else
+      messages.incoming.where('created_at > ?', agent_last_seen_at).count
+    end
   end
 
   def cached_label_list_array
@@ -228,6 +272,14 @@ class Conversation < ApplicationRecord
 
   def is_boosted_post?
     additional_attributes&.dig('is_boosted') == true
+  end
+
+  # Helper method to mark status as explicitly set (used by builders and services)
+  # so that determine_conversation_status keeps the provided status instead of
+  # applying the inbox default. Must be public: it is invoked from ConversationBuilder
+  # and other collaborators on the instance.
+  def status_explicitly_set!
+    @status_explicitly_set = true
   end
 
   private
@@ -280,11 +332,6 @@ class Conversation < ApplicationRecord
     end
 
     Rails.logger.info("[Conversation] determine_conversation_status - Final status: #{status}")
-  end
-
-  # Helper method to mark status as explicitly set (used by builders and services)
-  def status_explicitly_set!
-    @status_explicitly_set = true
   end
 
   def notify_conversation_creation
@@ -406,27 +453,98 @@ class Conversation < ApplicationRecord
   end
 
   def assign_to_default_pipeline
-    default_pipeline = Pipeline.default.first
-    unless default_pipeline
-      Rails.logger.info "[Pipeline] No default pipeline found, skipping auto-assignment for conversation #{id}"
+    target_pipeline, target_stage, lead_item = resolve_target_pipeline
+
+    unless target_pipeline
+      Rails.logger.info "[Pipeline] No pipeline found for conversation #{id}, skipping auto-assignment"
       return
     end
 
-    # Verifica se já está no pipeline (prevenção de duplicatas)
-    if default_pipeline.pipeline_items.exists?(conversation: self)
-      Rails.logger.info "[Pipeline] Conversation #{id} already in default pipeline #{default_pipeline.id}, skipping"
+    if target_pipeline.pipeline_items.exists?(conversation: self)
+      Rails.logger.info "[Pipeline] Conversation #{id} already in pipeline #{target_pipeline.id}, skipping"
       return
     end
 
-    result = default_pipeline.add_conversation(self, nil, nil)
+    # FUSÃO: já existe um card de lead/compra do contato (conversation_id: nil) neste funil →
+    # PROMOVE esse card (passa a apontar p/ esta conversa) em vez de criar um 2º. Um card por
+    # contato; as labels/automações da conversa passam a agir no card existente (cura o "estágio
+    # preso"). Se a promoção não rolar (sem lead-card OU race), CAI no fluxo normal abaixo.
+    return if promote_lead_card(lead_item, target_pipeline)
+
+    service = Pipelines::ConversationService.new(pipeline: target_pipeline)
+    result = service.add_conversation(self, stage: target_stage)
     if result
-      Rails.logger.info "[Pipeline] Conversation #{id} auto-assigned to default pipeline #{default_pipeline.name}"
+      Rails.logger.info "[Pipeline] Conversation #{id} auto-assigned to pipeline '#{target_pipeline.name}'" \
+                        "#{target_stage ? " / stage '#{target_stage.name}'" : ''}"
     else
-      Rails.logger.warn "[Pipeline] Failed to auto-assign conversation #{id} to default pipeline #{default_pipeline.name} (no stages?)"
+      Rails.logger.warn "[Pipeline] Failed to auto-assign conversation #{id} to pipeline #{target_pipeline.name} (no stages?)"
     end
   rescue StandardError => e
-    Rails.logger.error "[Pipeline] Failed to add conversation #{id} to default pipeline: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
-    # Não falha a criação da conversation se pipeline assignment falhar
+    Rails.logger.error "[Pipeline] Failed to add conversation #{id} to pipeline: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+  end
+
+  # Promove um card de lead/compra existente do contato (conversation_id: nil) para apontar p/
+  # ESTA conversa. CRÍTICO: o PipelineItem exige OU contact_id OU conversation_id (nunca os dois)
+  # → seta conversation_id E LIMPA contact_id no MESMO update (item vira conversation-axis).
+  # Retorna true SÓ se promoveu de fato. Numa race (índice único conversation_id por pipeline) o
+  # RecordNotUnique significa "outra conversa já promoveu" → também resolvido (true). Qualquer
+  # OUTRA falha NÃO é engolida: retorna false → o chamador cai no add_conversation normal (nunca
+  # deixa a conversa sem card — foi o bug do fix anterior).
+  def promote_lead_card(lead_item, _target_pipeline)
+    return false unless lead_item
+
+    lead_item.update!(conversation_id: id, contact_id: nil)
+    Rails.logger.info "[Pipeline] Conversation #{id} promoted onto existing lead card #{lead_item.id}"
+    replay_stage_entry_for_promoted_card(lead_item)
+    true
+  rescue ActiveRecord::RecordNotUnique
+    # Race: outra conversa já promoveu este lead-card (índice único conversation_id). Resolvido.
+    Rails.logger.info "[Pipeline] Lead card already promoted for conversation #{id} (race) — ok"
+    true
+  rescue StandardError => e
+    # NUNCA deixar a conversa sem card: qualquer outra falha na promoção → false → o chamador
+    # cai no add_conversation normal (cria o card). Um dup-card é aceitável; zero-card NÃO é.
+    Rails.logger.warn "[Pipeline] Lead card promotion failed for conversation #{id} (#{e.class}: #{e.message}) — fallback to add_conversation"
+    false
+  end
+
+  # The promotion never touches `pipeline_stage_id`, so no stage event is born
+  # from it and the stage entry stayed lost for good.
+  def replay_stage_entry_for_promoted_card(lead_item)
+    Rails.configuration.dispatcher.dispatch(
+      'pipeline_stage_updated',
+      Time.zone.now,
+      pipeline_item: lead_item,
+      changed_attributes: { 'pipeline_stage_id' => [nil, lead_item.pipeline_stage_id] },
+      promoted_from_lead_card: true
+    )
+  rescue StandardError => e
+    Rails.logger.error "[Pipeline] Failed to replay stage entry for promoted card #{lead_item.id}: #{e.class}: #{e.message}"
+  end
+
+  def resolve_target_pipeline
+    # Prioridade 1: pipeline ativo do contato (mais recente, apenas leads — conversation_id: nil)
+    if contact_id.present?
+      contact_item = PipelineItem
+                       .active
+                       .where(contact_id: contact_id, conversation_id: nil)
+                       .order(created_at: :desc)
+                       .includes(:pipeline, :pipeline_stage)
+                       .first
+
+      if contact_item
+        Rails.logger.info "[Pipeline] Contact #{contact_id} already in pipeline '#{contact_item.pipeline.name}'" \
+                          " / stage '#{contact_item.pipeline_stage.name}' — promoting it for conversation #{id}"
+        # 3º valor = o PRÓPRIO card de lead → assign_to_default_pipeline o PROMOVE (em vez de criar 2º).
+        return [contact_item.pipeline, contact_item.pipeline_stage, contact_item]
+      end
+    end
+
+    # Fallback: pipeline padrão (sem lead-card → 3º valor nil → fluxo normal cria o card).
+    default_pipeline = Pipeline.default.first
+    return [nil, nil, nil] unless default_pipeline
+
+    [default_pipeline, nil, nil]
   end
 
   # Note: Database trigger removed - display_id is now generated in Ruby via before_create callback

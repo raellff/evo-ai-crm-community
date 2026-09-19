@@ -1,6 +1,26 @@
 # frozen_string_literal: true
 
 class Api::V1::Zapi::SettingsController < Api::V1::BaseController
+  require_permissions({
+    show: 'inboxes.read',
+    update_profile_picture: 'inboxes.update',
+    update_profile_name: 'inboxes.update',
+    update_instance_name: 'inboxes.update',
+    update_profile_description: 'inboxes.update',
+    update_call_reject: 'inboxes.update',
+    update_call_reject_message: 'inboxes.update',
+    restart: 'inboxes.update',
+    disconnect: 'inboxes.update',
+    privacy_disallowed_contacts: 'inboxes.read',
+    privacy_set_last_seen: 'inboxes.update',
+    privacy_set_photo_visualization: 'inboxes.update',
+    privacy_set_description: 'inboxes.update',
+    privacy_set_group_add_permission: 'inboxes.update',
+    privacy_set_online: 'inboxes.update',
+    privacy_set_read_receipts: 'inboxes.update',
+    privacy_set_messages_duration: 'inboxes.update'
+  })
+
   before_action :set_instance_params
 
   # GET /api/v1/zapi/settings/:instance_id
@@ -353,6 +373,7 @@ class Api::V1::Zapi::SettingsController < Api::V1::BaseController
   end
 
   # Privacy endpoints
+  public
 
   # GET /api/v1/zapi/settings/:instance_id/privacy_disallowed_contacts
   def privacy_disallowed_contacts

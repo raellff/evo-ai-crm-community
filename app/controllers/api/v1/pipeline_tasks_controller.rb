@@ -1,6 +1,15 @@
 class Api::V1::PipelineTasksController < Api::V1::BaseController
+  TASK_PIPELINE_ACTIONS = [
+    :index, :create, :show, :update, :destroy,
+    :complete, :cancel, :reopen, :add_subtask, :move, :reorder
+  ].freeze
+
   before_action :set_pipeline_item, only: [:index, :create]
   before_action :set_task, only: [:show, :update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
+  # EVO-2204: the nesting pipeline was resolved by a bare find and authorized nowhere, so
+  # tasks in another user's private board were readable and plantable. Same :view? gate
+  # the sibling pipeline controllers use.
+  before_action :authorize_pipeline!, only: TASK_PIPELINE_ACTIONS
   before_action :authorize_task, only: [:update, :destroy, :complete, :cancel, :reopen, :add_subtask, :move, :reorder]
 
   def index
@@ -41,6 +50,7 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
 
   def create
     @task = @pipeline_item.tasks.new(task_params)
+    authorize @task, policy_class: PipelineTaskPolicy unless service_authenticated?
     @task.created_by = Current.user
 
     if @task.save
@@ -264,7 +274,107 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
   end
   # rubocop:enable Metrics/AbcSize
 
+  # Creates a PipelineTask on a conversation's active pipeline_item. Consumed by
+  # the evo-flow Journey "Create Pipeline Task" node. A conversation with no
+  # active pipeline_item degrades to a logged skip. created_by falls back through
+  # the conversation/item owners because the Journey call is service-authenticated
+  # (no Current.user) and the Community fork has no SuperAdmin system user.
+  def for_conversation
+    conversation = find_conversation(params[:conversation_id])
+    return error_response(ApiErrorCodes::CONVERSATION_NOT_FOUND, 'Conversation not found') if conversation.nil?
+
+    pipeline_item = conversation.pipeline_items.active.first
+    return skip_task('no_pipeline_item', conversation) if pipeline_item.nil?
+
+    return refuse_archived_pipeline unless pipeline_item.pipeline.is_active
+
+    creator = resolve_task_creator(conversation, pipeline_item)
+    return skip_task('no_creator', conversation) if creator.nil?
+
+    task = create_conversation_task(pipeline_item, creator)
+    success_response(
+      data: { created: true, task_id: task.id },
+      message: 'Pipeline task created successfully',
+      status: :created
+    )
+  rescue ActiveRecord::RecordInvalid => e
+    error_response(ApiErrorCodes::VALIDATION_ERROR, e.message, details: e.record.errors.as_json)
+  end
+
   private
+
+  def find_conversation(ref)
+    Conversation.find_by(id: ref) || Conversation.find_by(display_id: ref)
+  end
+
+  # Same refusal the pipeline_items endpoints give: a journey must not keep filing
+  # work into a board the operator archived (EVO-2203).
+  def refuse_archived_pipeline
+    error_response(
+      ApiErrorCodes::PIPELINE_ARCHIVED,
+      'Pipeline is archived and cannot receive tasks',
+      status: :unprocessable_entity
+    )
+  end
+
+  def create_conversation_task(pipeline_item, creator)
+    pipeline_item.tasks.create!(
+      title: params[:title],
+      description: params[:description],
+      task_type: params[:task_type].presence || 'call',
+      priority: params[:priority].presence || 'low',
+      assigned_to_id: resolve_assignee_id(params[:assigned_to_id]),
+      due_date: calculate_due_date(params[:due_in]),
+      created_by: creator
+    )
+  end
+
+  # assigned_to has no DB foreign key and the belongs_to is optional, so a stale
+  # assignee id (e.g. a deleted user) would be silently stored as a dangling
+  # reference. Drop it and create the task unassigned rather than fail the whole
+  # automation step.
+  def resolve_assignee_id(assigned_to_id)
+    return nil if assigned_to_id.blank?
+    return assigned_to_id if User.exists?(id: assigned_to_id)
+
+    Rails.logger.warn(
+      "PipelineTasks#for_conversation: assigned_to_id #{assigned_to_id.inspect} " \
+      'is not a known user; creating task unassigned'
+    )
+    nil
+  rescue StandardError
+    nil
+  end
+
+  def skip_task(reason, conversation)
+    Rails.logger.warn(
+      "PipelineTasks#for_conversation: conversation #{conversation.id} skipped (#{reason})"
+    )
+    success_response(
+      data: { created: false, skipped: true, reason: reason },
+      message: 'Pipeline task skipped'
+    )
+  end
+
+  def resolve_task_creator(conversation, pipeline_item)
+    Current.user || conversation.assignee || pipeline_item.assigned_by ||
+      User.order(:created_at).first
+  end
+
+  DUE_DATE_UNITS = %w[minutes hours days weeks months].freeze
+
+  def calculate_due_date(due_in)
+    return nil if due_in.blank?
+    return Time.zone.parse(due_in) if due_in.is_a?(String) && due_in.match?(/^\d{4}-\d{2}-\d{2}/)
+
+    value, unit = due_in.to_s.split('.')
+    return nil unless value.present? && DUE_DATE_UNITS.include?(unit)
+
+    value.to_i.public_send(unit).from_now
+  rescue StandardError => e
+    Rails.logger.error "Error parsing due_date: #{e.message}"
+    nil
+  end
 
   def set_pipeline_item
     @pipeline = Pipeline.find(params[:pipeline_id])
@@ -274,6 +384,14 @@ class Api::V1::PipelineTasksController < Api::V1::BaseController
   def set_task
     @pipeline = Pipeline.find(params[:pipeline_id]) if params[:pipeline_id].present?
     @task = PipelineTask.all.includes(subtasks: :subtasks, parent_task: :parent_task).find(params[:id])
+  end
+
+  # Journeys reach these endpoints with a service token and no Current.user, exactly
+  # like #create already assumes — same bypass, or evo-flow loses task creation.
+  def authorize_pipeline!
+    return if service_authenticated? || @pipeline.nil?
+
+    authorize @pipeline, :view?
   end
 
   def authorize_task

@@ -3,3 +3,6 @@ docker/entrypoints/**     text eol=lf
 docker/entrypoints/*.sh   text eol=lf
 *.sh                      text eol=lf
 *.rb                      text eol=lf
+# bin/ scripts have no extension, so the rules above never match them; without
+# this a Windows checkout puts CRLF in their shebangs (EVO-2011).
+bin/*                     text eol=lf

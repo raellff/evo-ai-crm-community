@@ -36,7 +36,7 @@ class Attachment < ApplicationRecord
   has_one_attached :file
   validate :acceptable_file
   validates :external_url, length: { maximum: Limits::URL_LENGTH_LIMIT }
-  enum file_type: { :image => 0, :audio => 1, :video => 2, :file => 3, :location => 4, :fallback => 5, :share => 6, :story_mention => 7,
+  enum :file_type, { :image => 0, :audio => 1, :video => 2, :file => 3, :location => 4, :fallback => 5, :share => 6, :story_mention => 7,
                     :contact => 8, :ig_reel => 9 }
 
   def message
@@ -53,15 +53,22 @@ class Attachment < ApplicationRecord
     base_data.merge(metadata_for_file_type)
   end
 
-  # NOTE: the URl returned does a 301 redirect to the actual file
+  # Attachment URLs route through ActiveStorage's resolve_model_to_route
+  # (:rails_storage_proxy by default — see config/environments): the app serves
+  # the bytes, so the storage endpoint (S3/MinIO/Disk) never reaches the
+  # browser (EVO-2006). Hosts come from routes.default_url_options (BACKEND_URL);
+  # ActiveStorage::Current.url_options / ACTIVE_STORAGE_URL do not apply to
+  # route helpers, so these URLs must not be wrapped in BlobUrlOptions scoping.
   def file_url
-    file.attached? ? url_for(file) : ''
+    return '' unless file.attached?
+
+    url_for(file)
   end
 
-  # NOTE: for External services use this methods since redirect doesn't work effectively in a lot of cases
   def download_url
-    ActiveStorage::Current.url_options = Rails.application.routes.default_url_options if ActiveStorage::Current.url_options.blank?
-    file.attached? ? file.blob.url : ''
+    return '' unless file.attached?
+
+    url_for(file)
   end
 
   def thumb_url

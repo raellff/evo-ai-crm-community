@@ -40,7 +40,9 @@ Evo CRM Backend is part of the [Evo CRM Community](https://github.com/evolution-
 git clone --recurse-submodules git@github.com:evolution-foundation/evo-crm-community.git
 ```
 
-The Community Edition is **single-tenant** by design — one account, no multi-tenancy overhead, no super-admin, no billing or plans. All limits are removed and features are unlocked by default.
+The Community Edition is **single-tenant** by design — one account, no multi-tenancy overhead, no billing or plans. All limits are removed and features are unlocked by default.
+
+RBAC seeds three roles: `agent` (attendance only), `account_owner` (the whole catalog except `accounts.stats` and `installation_configs.manage`) and `super_admin` — the installation owner, the only role holding `installation_configs.manage` (SMTP, Storage, Social Login, OpenAI, Channels, Inbound Email, Frontend Runtime). Two facts a security review needs, because neither is enforced by the code: `super_admin` has **no single-holder guarantee** — the setup wizard grants it to the user it creates and the `PromoteFirstUserToSuperAdmin` migration grants it to the oldest user of an already-bootstrapped installation, but nothing prevents more, so audit `user_roles` for the role key instead of assuming one; and the seeded three are **not the whole set** — `account_owner` holds `roles.create`, so custom roles can be created at runtime via `POST /api/v1/roles`. The authoritative role model is `db/seeds/rbac.rb` in `evo-auth-service-community`; `Role::ADMIN_ROLE_KEYS` in this repo is an admin-bypass allowlist that also names legacy `administrator`/`admin` keys, not the role model.
 
 ---
 
@@ -263,6 +265,45 @@ docker-compose up backend worker
 
 ---
 
+## Maintenance tasks
+
+### Legacy template migration (EVO-1234)
+
+Ports channel-coupled message templates (rows with `channel_id NOT NULL`) into the
+global/independent flow introduced by EVO-1231, creating a channel-less
+(`channel_id IS NULL`) counterpart for each. WhatsApp Cloud templates are
+intentionally **not** migrated — Meta requires an approved template tied to a WABA
+channel, so they stay channel-bound.
+
+```bash
+# 1. Preview — logs the counts that would migrate, writes nothing
+DRY_RUN=true bundle exec rake templates:migrate_legacy
+
+# 2. (Recommended) back up the table before applying in production
+pg_dump -t message_templates "$DATABASE_URL" > message_templates_backup.sql
+
+# 3. Apply — idempotent, safe to rerun (provenance tracked via external_legacy_id)
+bundle exec rake templates:migrate_legacy
+
+# Rollback — deletes ONLY migrated globals (external_legacy_id IS NOT NULL);
+# channel-bound originals and admin-created globals are untouched.
+bundle exec rake templates:rollback_legacy_migration
+```
+
+Notes:
+
+- **Idempotent:** rerunning never duplicates (each copy carries
+  `external_legacy_id = "message_template:<source_id>"`, backed by a partial
+  unique index).
+- **Rollback caveat:** rollback also discards any admin edits made to migrated
+  templates after the migration ran.
+- Best run **after** the template menu UI (EVO-1233) is available so an admin can
+  visually validate the migrated globals.
+- The migration emits Prometheus counters (`templates_migrated_total{source}`,
+  `templates_migrated_skipped{reason}`), but the authoritative result is the
+  summary printed by the rake task and the structured log lines — the counters
+  increment in the worker process and are not exposed to the web `/metrics` scrape.
+
 ## Documentation
 
 | Resource | Link |
@@ -362,6 +403,10 @@ For security issues, **do not open a public issue**. Email **suporte@evofoundati
 ## License
 
 Evo CRM Backend is licensed under the Apache License 2.0. See [LICENSE](./LICENSE) for details.
+
+This product includes software from [Chatwoot](https://github.com/chatwoot/chatwoot),
+Copyright (c) 2017-2026 Chatwoot Inc., licensed under the MIT Expat license. See
+[LICENSE-chatwoot](./LICENSE-chatwoot) and [NOTICE](./NOTICE).
 
 ## Trademarks
 

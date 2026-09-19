@@ -14,10 +14,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **EVO-1239** — Telegram `send_on_telegram` passa a registrar status `delivered` após envio bem-sucedido. Read receipts não são suportados pela Bot API (Telegram limitation) e portanto `read` permanece n/a neste canal.
+- **CRM-180 — README: modelo de papéis corrigido** — a introdução afirmava que a Community não tem `super_admin`. O seed de RBAC do `evo-auth-service-community` cria o papel (único com `installation_configs.manage`), o setup wizard o concede ao usuário do bootstrap e a migration `PromoteFirstUserToSuperAdmin` ao usuário mais antigo de instalações já bootstrapadas — sem nenhuma garantia de titular único. O texto passa a descrever os três papéis semeados e os papéis customizados criáveis em runtime (`POST /api/v1/roles`), e aponta `db/seeds/rbac.rb` como fonte autoritativa; `Role::ADMIN_ROLE_KEYS` deste repo é allowlist de bypass administrativo, não o modelo de papéis.
 
 ### Fixed
 
-- N/A
+- **CRM-448** — Mensagem de WhatsApp que o provider recusa **antes de enviar** (sem anexo, sem conteúdo, não-interativa → `is_unsupported`) deixa de ficar `sent` com ✓ e passa a terminar **`failed`**, com a razão em `content_attributes.external_error` ("Content type is not supported by this WhatsApp channel") — via `Messages::StatusUpdateService`, publicando o Wisper `:message_status_changed`. Vale para os providers `evolution` e `evolution_go`. ⚠️ **Efeito observável:** automações/alertas que consomem `message.failed` (ex.: EvoFlow) passam a receber eventos para uma classe de mensagem que antes era silenciosa.
+- **CRM-177** — As notas do contato voltam a ser exibidas. `Api::V1::Contacts::NotesController` era o único controller de contatos que respondia `render json:` cru em vez do envelope padrão `{ success, data, meta }` (`success_response`), e o frontend desembrulha toda resposta por `data.data` — contra um array cru isso é `undefined`, então a lista renderizava vazia mesmo com as notas persistidas no banco. O `create` mascarava o defeito pelo fallback de resposta sem envelope: a nota criada aparecia na hora e sumia no reload, o que era relatado como "a nota não salva". Um defeito, dois sintomas. ⚠️ **Mudança de contrato:** `index`, `show`, `create`, `update` e `destroy` de `/api/v1/contacts/:contact_id/notes` passam a responder o envelope padrão — `index` devolve a lista em `data` (era array na raiz), e `destroy` deixa de responder corpo vazio (`head :ok`) e passa a devolver `{ success, data: {}, message }`. **Integração externa** que lê esses endpoints direto precisa passar a ler `data`; nenhum consumidor interno é afetado (a tela de contatos é o único, e já desembrulhava por `data`).
+- **CRM-111** — `ACTIVE_STORAGE_SERVICE` volta a ser resolvido **ENV-first** no resolver dinâmico (`config/initializers/active_storage_dynamic_service.rb`) e no teste de conexão do admin. Uma linha stale em `installation_configs` (`local`) vencia o ENV correto e toda mídia nova nascia no disco efêmero do container: em Swarm, sem volume compartilhado, a mídia baixada pelo Sidekiq não era encontrada pelo web e o anexo quebrava no chat. O banco só é consultado quando o ENV está ausente. **Instalações já afetadas** precisam corrigir o dado (`ACTIVE_STORAGE_SERVICE=s3_compatible` no `installation_configs` + `GlobalConfig.clear_cache`) ou remover a linha — os blobs gravados no disco durante a janela estão perdidos.
+
+## [v1.0.0-rc6] - 2026-07-04
+
+A large feature release built around four themes: **(1) global Message Templates cutover** (dedicated CRUD, data migration of legacy channel-coupled templates, shared variable resolver), **(2) a new SendGrid email channel**, **(3) storage/media overhaul** (ActiveStorage now defaults to `:local`, attachments served through the app proxy), and **(4) server-side PII masking for non-admin users**. It also ships the B14 Lead Capture surface (form-builder + chat pages), conversation-history and product CSV imports, a round of automation-engine repairs, pipeline performance work, label-tagging persistence fixes, WhatsApp channel-state hardening, and a significantly more capable Evolution Hub integration (IG/FB DMs, auto-healing, template re-sync).
+
+### Highlights
+
+- **Message Templates go global** — templates are decoupled from channels (EVO-1231), get a dedicated CRUD endpoint with inbox cutover (EVO-1716), a data migration that moves legacy channel-coupled templates into the global flow (EVO-1234, hardened in EVO-1718/1719), WhatsApp Cloud approval sync (EVO-1232), and a shared variable resolver used by journey and API sends (EVO-1267).
+- **SendGrid email channel** — full channel implementation: model + CRUD (EVO-1248), API-key validation with event-webhook registration (EVO-1249), event webhook receiver (EVO-1250), `mail/send` client with per-message wire-up (EVO-1251), and HTML template rendering (EVO-1721).
+- **Storage defaults changed (breaking for S3 installs)** — `ACTIVE_STORAGE_SERVICE` now defaults to `local` instead of `s3_compatible`, with an automatic fallback to `:local` when the configured bucket is missing (EVO-1961). Attachments are served through the app proxy by default via the new `ATTACHMENT_DELIVERY` flag (EVO-2006), and `ACTIVE_STORAGE_URL` is honored across browser, Sidekiq and previews (EVO-1747).
+- **Server-side PII masking** — contact phone/email/identifier are masked for non-admin users across REST, ActionCable broadcasts and background jobs (EVO-1551, three hardening rounds).
+
+### Added
+
+- **Message Templates — global cutover (EVO-1231/1232/1234/1235/1716/1717)** — templates decoupled from channels for a global menu, channel link + WhatsApp Cloud approval sync, migration of channel-coupled templates into the global flow, message-send call sites rewired to the global `MessageTemplate`, dedicated CRUD endpoint with inbox cutover, and WABA-wide template status lookup. Service-token reads allowed on per-inbox templates (EVO-1255), and a global template can now be used as an inbox greeting / out-of-office message (EVO-1760).
+- **Shared template variable resolver (EVO-1267)** — one resolver for journey and API sends, replacing per-call-site interpolation.
+- **SendGrid email channel (EVO-1248/1249/1250/1251)** — channel model, migration and CRUD; key validation and automatic event-webhook registration on channel save; event webhook receiver (delivery/bounce/suppression tracking on contacts); `mail/send` client wired per message, with email signature support.
+- **B14 CRM Lead Capture (EVO-1771)** — form-builder (`crm_forms`) and public chat pages (`chat_pages`) for capturing leads into the CRM.
+- **Conversations history import (EVO-1557)** — import past conversations via `DataImport`.
+- **Products CSV bulk import (EVO-1555)** — bulk import endpoint, plus a `dry_run` preview mode with per-row validation and response counts (EVO-1736); products endpoints now return structured field errors (EVO-1783).
+- **Pipeline stage inactivity actions** — configurable actions fired when an item sits in a stage past a threshold, with scheduling and execution tracking (`stage_inactivity_executions`).
+- **`update_custom_attribute` automation action (EVO-1751)**.
+- **RBAC — per-inbox granularity** — agents' conversation access is scoped by role via `assigned_inboxes`; orphaned `team_members` links are healed.
+- **Evolution Hub expansion** — Instagram/Facebook DMs received via the Hub now become conversations (dispatch shape + activation on `channel_connected`); `ChannelReconciler` + `EvolutionHubReconcilable` concern auto-heal broken channels; Cloud API templates are re-synced after `channel_connected` (EVO-1827); IG contact profile (name/photo) enriched via Hub proxy; new `HUB_ALLOW_EXISTING_CHANNELS` flag to disable "use existing channel" linking.
+- **Live channel state on `/inboxes` (EVO-1674)** — exposes `connection_state` / `last_sync`.
+- **Segments proxy (EVO-1247/1569)** — segments CRUD + preview, delete/recompute/contact-ids proxied through the CRM.
+- **evo-flow journey support** — `pipeline.stage_changed` published to evo-flow (EVO-1266), `move_conversation` endpoint (EVO-1272), `pipeline_tasks#for_conversation` (EVO-1273), `email_team` and `canned_response` show endpoints (EVO-1634), unread conversation count endpoint (EVO-1550).
+- **Timeline activity for handoffs** — AI→human handoff persisted as an activity message (EVO-1560) and reverse human→bot handoff recorded (EVO-1680).
+- **Canned response attachments (EVO-1861)** — read, remove, size limit.
+- **WhatsApp contact-revoke notice + agent-delete propagation (EVO-1890/1891)**.
+- **Contacts — filter by company (EVO-1887)** via the `contact_companies` association; label `usage_count` exposed with tagging cleanup on delete (EVO-1863).
+- **Inbox member notifications (EVO-1459)** — members notified on new messages in unassigned conversations.
+- **ERP webhook ingress (EVO-1735 S3.0)** — infra-only receiver groundwork.
+- **CI — per-PR images (EVO-1998)** — every internal PR builds `:pr-N` (+ `:sha`) images for the review environment.
+
+### Changed
+
+- **`ACTIVE_STORAGE_SERVICE` default is now `local` (EVO-1961)** — previously `s3_compatible`. When an S3-compatible service is configured but the bucket is missing/misconfigured, boot falls back to `:local` (checking the correct bucket key per provider) instead of crashing. **Breaking for S3 installations**: set `ACTIVE_STORAGE_SERVICE=s3_compatible` explicitly (see upgrade notes).
+- **Attachment delivery via app proxy (EVO-2006)** — new `ATTACHMENT_DELIVERY` env (default `proxy`) serves inbound and outbound media through ActiveStorage's proxy instead of redirecting to storage URLs; fixes broken media on S3/MinIO installs behind private buckets.
+- **`ACTIVE_STORAGE_URL` honored everywhere (EVO-1747)** — browser-facing URLs, Sidekiq jobs and previews all use the configured public URL.
+- **`file` mediatype mapped to `document` for Evolution API media send (EVO-1940)**.
+- **Automation engine — Ruby contact-condition evaluator retired (EVO-1642)** — phase 1 introduced a contact-capable conditions filter with shadow-compare; phase 2 removed the legacy Ruby evaluator.
+- **Model enums migrated to positional syntax for Rails 7.1+ (EVO-2007)**, with a boot-safe `source` enum via explicit attribute.
+- **Pipelines list served without items** — stages count only, plus contact-labels skipped in the pipelines payload to kill N+1s; `days_in_current_stage` and task counts optimized.
+- **Phone number normalization** — comprehensive normalization for contacts (also applied to WhatsApp echo handling).
+- **PgBouncer settings adjusted** for prepared statements and advisory locks.
+
+### Fixed
+
+#### Automation engine
+- **EVO-1635** — contact-triggered automations now execute and are recorded.
+- **EVO-1638** — contact condition operators and labels semantics corrected.
+- **EVO-1640** — silent contact drops now recorded as skipped runs.
+- **EVO-1641** — flow-mode action execution unified with simple mode.
+
+#### Pipelines
+- **EVO-1845** — idempotent heal for `stage_movements.pipeline_item_id` drift (data-heal migration).
+- Pipeline stats and funnel list now include **value**, not just counts.
+- Existing contact pipeline prioritized when creating a conversation; conversation merged into the contact's lead card (with a revert/refix cycle to avoid duplicate cards).
+- **EVO-1915** — `pipeline_items` notes persist without a stage and the response reflects the actual write.
+
+#### Labels
+- **EVO-1897** — tagging persisted on `contacts/labels#create`.
+- **EVO-1928** — contact tagging by name persisted.
+- **EVO-1932** — `Labelable` write paths hardened to always persist taggings.
+- **EVO-1863 (review)** — `label.removed` emitted for conversations on label delete; labels GET/POST render JSON (a 204 was wiping tags client-side).
+
+#### WhatsApp / channels
+- **EVO-1967** — channel no longer stuck in `reauthorization` after a transitory close.
+- **EVO-1748** — WhatsApp revoke/protocol messages skipped on `evolution_go` inbound.
+- **EVO-1682** — contact identifier format validated before use as WhatsApp destination.
+- Echo message handling normalizes phone numbers and ensures contact creation.
+- Hub `channel_token` retrieval and persistence hardened; IG/FB profile-fetch failure (error 190) no longer wedges the channel.
+
+#### API / conversations
+- **EVO-1898** — `status_explicitly_set!` call fixed in `ConversationBuilder`.
+- **EVO-1899** — `error_response` keyword→positional fixed across all call sites; **EVO-1923** — missing `ApiErrorCodes` constants defined.
+- **EVO-1900** — `agent_bot_inbox` persisted in `set_agent_bot`.
+- **EVO-1914** — invalid assignee/team id rejected without clearing the current assignment.
+- **EVO-1972** — `conversations#show` no longer serializes the full message thread.
+- **EVO-1958** — `inbox.agent_bot_inbox` preloaded on the conversation list (N+1).
+- **EVO-1960** — conversation-list backend: sort parity, chips, archived.
+- **EVO-1849/1850** — contact `country_code` filter on the top-level column; `custom_attributes` display-name keys backfilled to `attribute_key`.
+
+#### EvoFlow
+- **EVO-1570** — required `source` emitted in backfill payloads; **EVO-1571** — proxy reads events from the `data.events` envelope.
+
+#### Misc
+- **EVO-1966** — dev stack no longer corrupts `db/schema.rb` (schema dump disabled after migration).
+- Agent `contextId` stabilized (indifferent-access payload); agent media links rendered as real media; `ZapiSyncListener` only reads `provider` on WhatsApp channels.
+- SendGrid sends render the template HTML instead of raw `message.content` (EVO-1721).
+
+### Security
+
+- **EVO-1551 — server-side PII masking for non-admin users** — contact `phone`/`email`/`identifier` (and phone-like names) are masked for agents when the account flag is on, across REST serializers, ActionCable broadcasts and background jobs. Three hardening rounds closed leaks in listener paths without `Current.user`, account-wide broadcasts triggered by admins, `ContactInbox#source_id` (WhatsApp JIDs embed the phone), notification sender names, pre-chat `content_attributes`, and `contactable_inboxes` (default-deny with an opaque-id allowlist; the builder regenerates `source_id` server-side).
+- **EVO-1938 — Segments proxy endpoints now enforce permissions**, alongside per-inbox RBAC scoping.
+- **`EVOLUTION_HUB_API_KEY` encrypted at rest and masked in API responses** (migration `encrypt_evolution_hub_api_key_at_rest`).
+- **`HUB_ALLOW_EXISTING_CHANNELS`** — flag to disable linking existing Hub channels, preventing cross-tenant channel leakage.
+- **Server-to-server permission checks use the service token**, not the user bearer.
+- **OAuth `config_types` allowlist** for MCP integrations in the admin.
+- **CI — `build-pr` gated to internal PRs** (forks get no secrets).
+
+### Notes for upgrade
+
+- **Run `db:migrate`** — 15 new migrations (`20260608194533` … `20260701120000`): SendGrid channel tables, message-template decoupling + legacy refs, stage inactivity executions, CRM forms + chat pages, `stage_movements` FK heal, `source` columns on messages/conversations, contact custom-attribute key backfill, and at-rest encryption of `EVOLUTION_HUB_API_KEY`. The template data migration moves legacy channel-coupled templates into the global flow and is idempotent (same-named legacy templates preserved).
+- **Breaking — storage default changed**: `ACTIVE_STORAGE_SERVICE` now defaults to `local` (was `s3_compatible`). Installations using S3/MinIO **must set `ACTIVE_STORAGE_SERVICE=s3_compatible` explicitly** or attachments will be written to local disk after upgrade.
+- **New/changed environment variables**: `ATTACHMENT_DELIVERY` (default `proxy`; set `redirect` to restore direct storage URLs), `ACTIVE_STORAGE_URL` (public base URL for attachment links in browser/Sidekiq/previews), `HUB_ALLOW_EXISTING_CHANNELS` (default on; set to disable existing-channel linking).
+- The PII masking of EVO-1551 is controlled by an account flag; behavior is unchanged until the flag is enabled.
 
 ## [v1.0.0-rc5] - 2026-05-27
 
@@ -257,7 +368,8 @@ Four migrations made safe for re-run in PROD with drifted schemas (or partially 
 
 ---
 
-[Unreleased]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc5...HEAD
+[Unreleased]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc6...HEAD
+[v1.0.0-rc6]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc5...v1.0.0-rc6
 [v1.0.0-rc5]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc4...v1.0.0-rc5
 [v1.0.0-rc4]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc3...v1.0.0-rc4
 [v1.0.0-rc3]: https://github.com/evolution-foundation/evo-ai-crm-community/compare/v1.0.0-rc2...v1.0.0-rc3

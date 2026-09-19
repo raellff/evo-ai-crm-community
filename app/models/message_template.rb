@@ -4,61 +4,89 @@
 #
 # Table name: message_templates
 #
-#  id            :uuid             not null, primary key
-#  active        :boolean          default(TRUE)
-#  category      :string
-#  channel_type  :string           not null
-#  components    :jsonb
-#  content       :text             not null
-#  language      :string           default("pt_BR")
-#  media_type    :string
-#  media_url     :string
-#  metadata      :jsonb
-#  name          :string           not null
-#  settings      :jsonb
-#  template_type :string
-#  variables     :jsonb
-#  created_at    :datetime         not null
-#  updated_at    :datetime         not null
-#  channel_id    :uuid             not null
+#  id                 :uuid             not null, primary key
+#  active             :boolean          default(TRUE)
+#  category           :string
+#  channel_type       :string
+#  components         :jsonb
+#  content            :text             not null
+#  language           :string           default("pt_BR")
+#  media_type         :string
+#  media_url          :string
+#  metadata           :jsonb
+#  name               :string           not null
+#  settings           :jsonb
+#  template_type      :string
+#  variables          :jsonb
+#  created_at         :datetime         not null
+#  updated_at         :datetime         not null
+#  channel_id         :uuid
+#  external_legacy_id :string
 #
 # Indexes
 #
-#  idx_templates_active_by_channel     (channel_type,channel_id,active)
-#  idx_templates_by_category           (category)
-#  idx_templates_by_name               (name)
-#  idx_templates_by_type               (template_type)
-#  idx_templates_lookup                (name,channel_type,channel_id)
-#  index_message_templates_on_channel  (channel_type,channel_id)
+#  idx_message_templates_external_legacy_id  (external_legacy_id) UNIQUE WHERE (external_legacy_id IS NOT NULL)
+#  idx_message_templates_global_name         (name) UNIQUE WHERE (channel_id IS NULL)
+#  idx_templates_active_by_channel           (channel_type,channel_id,active)
+#  idx_templates_by_category                 (category)
+#  idx_templates_by_name                     (name)
+#  idx_templates_by_type                     (template_type)
+#  idx_templates_lookup                      (name,channel_type,channel_id)
+#  index_message_templates_on_channel        (channel_type,channel_id)
 #
 
 class MessageTemplate < ApplicationRecord
-  belongs_to :channel, polymorphic: true
+  # Channel is optional so templates can exist as global (channel-less) records.
+  # WhatsApp Cloud templates still require a channel (enforced below).
+  belongs_to :channel, polymorphic: true, optional: true
+
+  # Non-persisted hint used by the global create path to flag WhatsApp Cloud
+  # intent for a channel-less template, so the conditional validation can fire.
+  attr_accessor :intended_provider
+
+  # Maps Meta's raw template approval status (stored verbatim in
+  # settings['status']) onto a normalized lowercase vocabulary. The raw value is
+  # kept in settings['status'] for backward compatibility; `approval_status` is
+  # the normalized read view. (EVO-1232)
+  META_APPROVAL_STATUS = {
+    'APPROVED' => 'approved',
+    'REJECTED' => 'rejected',
+    'PENDING' => 'pending',
+    'PENDING_QUALITY_CHECK' => 'pending',
+    'PAUSED' => 'paused',
+    'FLAGGED' => 'flagged'
+  }.freeze
 
   validates :name, presence: true
   validates :content, presence: true
+  # When channel_type/channel_id are nil this scopes uniqueness to the global
+  # (nil, nil) bucket, i.e. global template names are unique.
   validates :name, uniqueness: { scope: [:channel_type, :channel_id] }
   validates :language, presence: true
   validates :media_type, inclusion: { in: %w[image video document audio] }, allow_nil: true
+  # Provenance/idempotency key for rows ported into the global flow (EVO-1234).
+  validates :external_legacy_id, uniqueness: true, allow_nil: true
+
+  validate :channel_required_for_whatsapp_cloud
 
   before_save :extract_variables_from_content
   after_initialize :set_defaults
 
-  enum template_type: {
+  enum :template_type, {
     text: 'text',
     media: 'media',
     interactive: 'interactive',
     location: 'location',
     contact: 'contact',
     product: 'product'
-  }, _prefix: true
+  }, prefix: true
 
-  enum media_type: {
+  enum :media_type, {
     image: 'image',
     video: 'video',
     document: 'document',
     audio: 'audio'
-  }, _prefix: true
+  }, prefix: true
 
   # Scopes
   scope :active, -> { where(active: true) }
@@ -150,6 +178,21 @@ class MessageTemplate < ApplicationRecord
     )
   end
 
+  # Meta WhatsApp Cloud template id, persisted by the sync path in
+  # metadata['external_id']. Read-only view. (EVO-1232)
+  def external_template_id
+    metadata.is_a?(Hash) ? metadata['external_id'] : nil
+  end
+
+  # Normalized approval status derived from the raw Meta status in
+  # settings['status']; 'draft' when the template was never synced. (EVO-1232)
+  def approval_status
+    raw = settings.is_a?(Hash) ? settings['status'] : nil
+    return 'draft' if raw.blank?
+
+    META_APPROVAL_STATUS.fetch(raw.to_s.upcase, raw.to_s.downcase)
+  end
+
   def serialized
     {
       'id' => id,
@@ -158,7 +201,11 @@ class MessageTemplate < ApplicationRecord
       'language' => language,
       'category' => category,
       'template_type' => template_type,
+      # 'status' is Meta's raw value (e.g. 'APPROVED'); 'approval_status' is the
+      # normalized lowercase view ('approved'). Both intentionally exposed.
       'status' => settings.is_a?(Hash) ? settings['status'] : nil,
+      'approval_status' => approval_status,
+      'external_template_id' => external_template_id,
       'settings' => settings,
       'components' => components,
       'variables' => variables,
@@ -175,6 +222,28 @@ class MessageTemplate < ApplicationRecord
   end
 
   private
+
+  # WhatsApp Cloud requires a Meta-approved template tied to a WhatsApp Cloud
+  # channel (WABA + namespace). A channel-less or wrong-type channel is invalid
+  # for a WhatsApp Cloud template. (EVO-1232 strengthens EVO-1231's presence-only
+  # rule to also enforce channel type + provider.)
+  # A template is "WhatsApp Cloud" when the global create path flags it via
+  # intended_provider, or when it is already bound to a WhatsApp Cloud channel.
+  def channel_required_for_whatsapp_cloud
+    return unless intended_provider == 'whatsapp_cloud' || whatsapp_cloud_channel?(channel)
+
+    # Error key is :channel_id (not :channel) so the JSON payload / frontend bind
+    # the validation to the channel_id form field, matching the 6.3 AC. (EVO-1717)
+    if channel.blank?
+      errors.add(:channel_id, 'is required for WhatsApp Cloud templates')
+    elsif !whatsapp_cloud_channel?(channel)
+      errors.add(:channel_id, 'must reference a WhatsApp Cloud channel')
+    end
+  end
+
+  def whatsapp_cloud_channel?(channel)
+    channel.is_a?(Channel::Whatsapp) && channel.provider == 'whatsapp_cloud'
+  end
 
   def set_defaults
     self.language ||= 'pt_BR'

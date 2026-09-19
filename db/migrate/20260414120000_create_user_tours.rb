@@ -1,7 +1,7 @@
 class CreateUserTours < ActiveRecord::Migration[7.1]
   def change
     unless table_exists?(:user_tours)
-      create_table :user_tours do |t|
+      create_table :user_tours, if_not_exists: true do |t|
         t.uuid :user_id, null: false
         t.string :tour_key, null: false
         t.string :status, null: false, default: 'completed'

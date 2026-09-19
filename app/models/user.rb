@@ -151,7 +151,25 @@ class User < ApplicationRecord
   end
 
   def assigned_inboxes
-    administrator? ? Inbox.all : inboxes
+    # Admins and users granted `conversations.read_all` (resolved once per request
+    # into Current by EvoAuthConcern — bearer/api-token — or by
+    # OauthAuthorizationHelper#authenticate_oauth_token! — OAuth) see every inbox.
+    # `Current.evo_can_read_all_inboxes` is nil outside a request (jobs); nil is
+    # treated as false here.
+    #
+    # There is deliberately NO zero-membership fallback: "see everything" comes
+    # ONLY from the conversations.read_all grant. The default `agent` role is
+    # SECURE-BY-DEFAULT — it does NOT hold read_all (CRM-181), so an agent sees
+    # only its member inboxes and an agent with no membership sees nothing until
+    # assigned; account_owner/super_admin keep read_all. The evo-auth CRM-181
+    # data-migration revokes read_all from the system `agent` role on upgrade;
+    # for CUSTOM roles an admin created, revoking is the admin's explicit act.
+    # The old `inbox_members.empty? -> Inbox.all` degrade made that revoke
+    # unenforceable for users with no memberships — the common state, since
+    # most installs never assigned inboxes.
+    return Inbox.all if administrator? || Current.evo_can_read_all_inboxes
+
+    inboxes
   end
 
   def serializable_hash(options = nil)

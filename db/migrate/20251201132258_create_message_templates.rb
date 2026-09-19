@@ -1,6 +1,6 @@
 class CreateMessageTemplates < ActiveRecord::Migration[7.1]
   def change
-    create_table :message_templates, id: :uuid do |t|
+    create_table :message_templates, id: :uuid, if_not_exists: true do |t|
       t.references :channel, polymorphic: true, null: false, type: :uuid, index: true
       
       t.string :name, null: false

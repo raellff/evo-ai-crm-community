@@ -1,3 +1,5 @@
+require 'digest'
+
 class Rack::Attack
   ### Configure Cache ###
 
@@ -36,6 +38,18 @@ class Rack::Attack
     def path_without_extentions
       path[/^[^.]+/]
     end
+  end
+
+  TENANT_UUID = /\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
+
+  # '' for anything not a uuid, so a garbage (or absent) evo_tenant shares one
+  # bucket instead of getting a private one. Never raises: a malformed query
+  # string must not 500 the throttle.
+  def self.purchase_webhook_tenant(req)
+    value = Rack::Utils.parse_query(req.query_string)['evo_tenant'].to_s
+    TENANT_UUID.match?(value) ? value : ''
+  rescue StandardError
+    ''
   end
 
   ### Safelist IPs from Environment Variable ###
@@ -102,6 +116,19 @@ class Rack::Attack
   ## Prevent Brute-Force Signup Attacks ###
   throttle('accounts/ip', limit: 5, period: 30.minutes) do |req|
     req.ip if req.path_without_extentions == '/api/v1/accounts' && req.post?
+  end
+
+  ## Product import connectors (B3.02) ###
+  # One call fans out into up to 25 outbound requests to a user-supplied store and holds
+  # a worker for tens of seconds (Products::Connectors::Base).
+  throttle('products/import_fetch/ip', limit: ENV.fetch('PRODUCT_IMPORT_FETCH_RATE_LIMIT', '10').to_i,
+                                       period: 1.minute) do |req|
+    req.ip if req.post? && req.path_without_extentions == '/api/v1/products/import_fetch'
+  end
+
+  ## Anti-spam for anonymous lead-capture form submissions (B14.01) ###
+  throttle('public/forms/submissions/ip', limit: ENV.fetch('FORM_SUBMISSION_RATE_LIMIT', '10').to_i, period: 1.hour) do |req|
+    req.ip if req.post? && req.path_without_extentions.match?(%r{\A/public/api/v1/forms/[^/]+/submissions\z})
   end
 
   ##-----------------------------------------------##
@@ -182,7 +209,7 @@ class Rack::Attack
 
   # Throttle by individual user (based on uid)
   throttle('/api/v2/reports/user', limit: ENV.fetch('RATE_LIMIT_REPORTS_API_USER_LEVEL', '100').to_i, period: 1.minute) do |req|
-    match_data = %r{/api/v2/reports}.match(req.path)
+    reports_request = req.path.include?('/api/v2/reports')
     # Extract user identification (uid for web, api_access_token for API requests)
     user_uid = req.get_header('HTTP_UID')
     api_access_token = req.get_header('HTTP_API_ACCESS_TOKEN') || req.get_header('api_access_token')
@@ -190,13 +217,75 @@ class Rack::Attack
     # Use uid if present, otherwise fallback to api_access_token for tracking
     user_identifier = user_uid.presence || api_access_token.presence
 
-    user_identifier if match_data.present? && user_identifier.present?
+    user_identifier if reports_request && user_identifier.present?
   end
 
   ## Prevent abuse of reports api
   throttle('/api/v2/reports', limit: ENV.fetch('RATE_LIMIT_REPORTS_API_ACCOUNT_LEVEL', '1000').to_i, period: 1.minute) do |req|
-    match_data = %r{/api/v2/reports}.match(req.path)
-    req.ip if match_data.present?
+    req.ip if req.path.include?('/api/v2/reports')
+  end
+
+  ## Prevent abuse of products bulk import (EVO-1555 S1)
+  ## Each request can ingest up to 500 products; default 10 reqs/min/key = 5000 products/min/key.
+  ## Endpoint authenticates via Authorization: Bearer; discriminator hashes the token (digest, not raw)
+  ## so the Redis key never holds credentials. Falls back to api_access_token then IP.
+  throttle('api/v1/products/bulk', limit: ENV.fetch('RATE_LIMIT_PRODUCTS_BULK', '10').to_i, period: 1.minute) do |req|
+    if req.path_without_extentions == '/api/v1/products/bulk' && req.post?
+      authorization = req.get_header('HTTP_AUTHORIZATION')
+      api_token     = req.get_header('HTTP_API_ACCESS_TOKEN') || req.get_header('api_access_token')
+
+      if authorization.present?
+        "bearer:#{Digest::SHA256.hexdigest(authorization)}"
+      elsif api_token.present?
+        "api_token:#{Digest::SHA256.hexdigest(api_token)}"
+      else
+        "ip:#{req.ip}"
+      end
+    end
+  end
+
+  ## Prevent abuse of the ERP webhook receiver (EVO-1735 S3.0)
+  ## Each request can ingest up to 500 products via Products::BulkImporter
+  ## (same ceiling as /api/v1/products/bulk). The discriminator is the
+  ## provider segment of the path, so the 11th request from a given
+  ## provider in the window trips 429 regardless of signature/payload —
+  ## which is what AC8 requires. A compromised secret still throttles.
+  throttle('api/v1/webhooks/erp', limit: ENV.fetch('RATE_LIMIT_ERP_WEBHOOK', '10').to_i, period: 1.minute) do |req|
+    match_data = %r{\A/api/v1/webhooks/erp/([^/]+)\z}.match(req.path_without_extentions)
+    "erp_webhook:#{match_data[1]}" if match_data && req.post?
+  end
+
+  ## Purchase webhook ingress (lead capture) — same posture as the ERP
+  ## webhook: throttled per provider path segment, signature or not, so a
+  ## compromised secret still throttles. Ceiling is higher because payment
+  ## platforms burst redeliveries after an outage.
+  throttle('api/v1/webhooks/purchases', limit: ENV.fetch('RATE_LIMIT_PURCHASE_WEBHOOK', '60').to_i, period: 1.minute) do |req|
+    match_data = %r{\A/api/v1/webhooks/purchases/([^/]+)\z}.match(req.path_without_extentions)
+    if match_data && req.post?
+      # evo_tenant joins the key so one noisy installation cannot starve the
+      # others on a shared deployment. It is caller-supplied, so ONLY a well
+      # formed uuid earns its own bucket — otherwise anyone could mint a fresh
+      # bucket per request and walk straight past the ceiling.
+      tenant = Rack::Attack.purchase_webhook_tenant(req)
+      "purchase_webhook:#{match_data[1]}:#{tenant}"
+    end
+  end
+
+  ## Prevent abuse of conversations history import (EVO-1557)
+  ## Each request can ingest up to 50k rows; default 5 reqs/min/key.
+  throttle('api/v1/conversations/import', limit: ENV.fetch('RATE_LIMIT_CONVERSATIONS_IMPORT', '5').to_i, period: 1.minute) do |req|
+    if req.path_without_extentions == '/api/v1/conversations/import' && req.post?
+      authorization = req.get_header('HTTP_AUTHORIZATION')
+      api_token     = req.get_header('HTTP_API_ACCESS_TOKEN') || req.get_header('api_access_token')
+
+      if authorization.present?
+        "bearer:#{Digest::SHA256.hexdigest(authorization)}"
+      elsif api_token.present?
+        "api_token:#{Digest::SHA256.hexdigest(api_token)}"
+      else
+        "ip:#{req.ip}"
+      end
+    end
   end
 
   ## ----------------------------------------------- ##

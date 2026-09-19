@@ -36,6 +36,20 @@ class InstallationConfig < ApplicationRecord
 
   ENCRYPTION_KEY_DERIVATION_SALT = 'installation_config_encryption_v1'
 
+  # Config names that must be masked in API responses and encrypted at rest even
+  # though they do NOT use the `_SECRET` suffix convention. Bearer credentials
+  # (used alone as an Authorization header) belong here. Keep this list tight —
+  # public-by-design values (*_CLIENT_ID, *_APP_ID, *_URL, etc.) must stay
+  # plaintext. See app_configs_controller.rb CONFIG_TYPES for the full catalog.
+  SENSITIVE_NAMES = %w[EVOLUTION_HUB_API_KEY].freeze
+
+  # Class-level predicate so the controller can decide preserve-on-nil / mask-guard
+  # WITHOUT instantiating a record. The `_SECRET` suffix rule is preserved 100% and
+  # the explicit set is additive.
+  def self.sensitive_name?(name)
+    name.to_s.end_with?('_SECRET') || SENSITIVE_NAMES.include?(name.to_s)
+  end
+
   def self.encryption_key
     @encryption_key ||= resolve_encryption_key
   end
@@ -60,7 +74,7 @@ class InstallationConfig < ApplicationRecord
   end
 
   def sensitive?
-    name.to_s.end_with?('_SECRET')
+    self.class.sensitive_name?(name)
   end
 
   def value

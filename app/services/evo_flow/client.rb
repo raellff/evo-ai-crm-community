@@ -1,6 +1,12 @@
 module EvoFlow
   # Raised on any non-2xx evo-flow response, an unparseable body, or a network
   # failure. Mirrors Crm::Hubspot::Api::BaseClient::ApiError (code + response).
+  #
+  # ConfigurationError was moved to its own file (configuration_error.rb) so
+  # Zeitwerk can autoload it by name: SegmentsController rescues it at class-body
+  # level, which resolves during eager-load before this file would define it.
+  # HTTPError stays here — it is only referenced inside method bodies (call-time),
+  # never at eager-load.
   class HTTPError < StandardError
     attr_reader :code, :response
 
@@ -11,31 +17,36 @@ module EvoFlow
     end
   end
 
-  # Raised at construction time for an unusable configuration (missing key,
-  # invalid scheme, or cleartext transport in production). Fails fast instead
-  # of emitting a request that is guaranteed to 401 or that leaks the shared
-  # key over cleartext.
-  class ConfigurationError < StandardError; end
-
   # Instance-based (DI-friendly) authenticated HTTP client for evo-flow.
   # Pattern mirrors app/services/crm/hubspot/api/base_client.rb (HTTParty +
   # custom error + handle_response).
   class Client
     include HTTParty
 
-    DEFAULT_API_URL = 'http://evo-flow:3000/api/v1'.freeze
+    # 3334 is the port evo-flow ships with (its own .env.example and every compose
+    # in the family set PORT=3334). Its code falls back to 3000 only when PORT is
+    # unset, which no deployment of ours does — defaulting to 3000 here just means
+    # a silent timeout against a port nothing listens on.
+    DEFAULT_API_URL = 'http://evo-flow:3334/api/v1'.freeze
     REDACTED_4XX = '[redacted: 4xx body]'.freeze
     MAX_LOGGED_BODY = 500
     VALID_SCHEMES = %w[http https].freeze
     # Accepted truthy values for EVO_FLOW_ALLOW_INSECURE (case-insensitive).
     INSECURE_TRUTHY = %w[true 1 yes on].freeze
+    # Verbs #request may dispatch. The proxy derives the verb from the inbound
+    # request, so it never reaches HTTParty unchecked.
+    SUPPORTED_VERBS = %i[get post put patch delete].freeze
 
+    # `extra_headers`: per-request passthrough (the proxies forward the caller's
+    # X-Evo-Tenant-Id + Authorization so multi-tenant evo-flow can resolve the
+    # tenant scope; auth itself stays on the integration key). nil values dropped.
     def initialize(api_url: ENV.fetch('EVO_FLOW_API_URL', DEFAULT_API_URL),
                    api_key: ENV.fetch('AUTH_APIKEY_INTEGRATION_LOCAL', nil),
-                   timeout: 10)
+                   timeout: 10, extra_headers: {})
       @api_url = api_url
       @api_key = api_key
       @timeout = timeout
+      @extra_headers = (extra_headers || {}).compact
       validate_config!
     end
 
@@ -57,6 +68,52 @@ module EvoFlow
                                 query: params.compact,
                                 headers: request_headers,
                                 timeout: @timeout)
+      handle_response(response)
+    rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
+           OpenSSL::SSL::SSLError => e
+      raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
+    end
+
+    def put(path, payload)
+      response = self.class.put(join(@api_url, path),
+                                body: payload.to_json,
+                                headers: request_headers,
+                                timeout: @timeout)
+      handle_response(response)
+    rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
+           OpenSSL::SSL::SSLError => e
+      raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
+    end
+
+    # EVO-2188: evo-flow updates a journey with PATCH (not PUT), so the journeys
+    # proxy needs this. Same contract as #put — body only, status dropped.
+    def patch(path, payload)
+      request(:patch, path, payload: payload).last
+    end
+
+    # EVO-2188: same transport as the verb helpers, but returns [status, body] —
+    # a passthrough proxy has to relay evo-flow's own status, which they drop.
+    def request(verb, path, payload: nil, query: nil)
+      raise ArgumentError, "unsupported evo-flow verb: #{verb.inspect}" unless SUPPORTED_VERBS.include?(verb)
+
+      options = { headers: request_headers, timeout: @timeout }
+      options[:body] = payload.to_json unless payload.nil?
+      options[:query] = query.compact unless query.nil?
+
+      response = self.class.public_send(verb, join(@api_url, path), options)
+
+      [response.code, handle_response(response)]
+    rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
+           OpenSSL::SSL::SSLError => e
+      raise EvoFlow::HTTPError.new("evo-flow request failed: #{e.message}", nil, nil)
+    end
+
+    # No body: evo-flow returns a JSON delete result (or an empty 204, in which
+    # case parse_body yields nil — fine to render).
+    def delete(path)
+      response = self.class.delete(join(@api_url, path),
+                                   headers: request_headers,
+                                   timeout: @timeout)
       handle_response(response)
     rescue HTTParty::Error, SocketError, Timeout::Error, SystemCallError,
            OpenSSL::SSL::SSLError => e
@@ -102,7 +159,7 @@ module EvoFlow
     end
 
     def request_headers
-      { 'Content-Type' => 'application/json', 'X-Integration-API-Key' => @api_key }
+      { 'Content-Type' => 'application/json', 'X-Integration-API-Key' => @api_key }.merge(@extra_headers)
     end
 
     def handle_response(response)

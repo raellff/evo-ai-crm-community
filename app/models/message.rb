@@ -67,7 +67,7 @@ class Message < ApplicationRecord
   }.to_json.freeze
 
   before_validation :ensure_content_type
-  before_validation :prevent_message_flooding
+  before_validation :prevent_message_flooding, unless: :imported?
   before_save :ensure_processed_message_content
   before_save :ensure_in_reply_to
 
@@ -85,8 +85,8 @@ class Message < ApplicationRecord
   # when you have a temperory id in your frontend and want it echoed back via action cable
   attr_accessor :echo_id
 
-  enum message_type: { incoming: 0, outgoing: 1, activity: 2, template: 3 }
-  enum content_type: {
+  enum :message_type, { incoming: 0, outgoing: 1, activity: 2, template: 3 }
+  enum :content_type, {
     text: 0,
     input_text: 1,
     input_textarea: 2,
@@ -100,17 +100,24 @@ class Message < ApplicationRecord
     integrations: 10,
     sticker: 11
   }
-  enum status: { sent: 0, delivered: 1, read: 2, failed: 3 }
+  enum :status, { sent: 0, delivered: 1, read: 2, failed: 3 }
+  # Explicit attribute keeps the model bootable when the source column has not been
+  # migrated yet (EVO-1999 deploy scenario: Puma boots before db:migrate runs).
+  # Type/default must stay in sync with db/migrate/20260622120000_add_source_to_messages.rb.
+  attribute :source, :integer, default: 0
+  enum :source, { live: 0, imported: 1 }
   # [:submitted_email, :items, :submitted_values] : Used for bot message types
   # [:email] : Used by conversation_continuity incoming email messages
   # [:in_reply_to] : Used to reply to a particular tweet in threads
   # [:deleted] : Used to denote whether the message was deleted by the agent
+  # [:revoked_by_contact] : Contact deleted (revoked) the message on WhatsApp; content is kept and shown with a notice
   # [:external_created_at] : Can specify if the message was created at a different timestamp externally
   # [:external_error : Can specify if the message creation failed due to an error at external API
   # [:is_reaction] : Used to denote if the message is a reaction and differentiate it from a simple reply message
   # [:is_edited, :previous_content] : Used to indicated edited message and previous content (before edit)
 
   store :content_attributes, accessors: [:submitted_email, :items, :submitted_values, :email, :in_reply_to, :deleted,
+                                         :revoked_by_contact, :revoke_propagated,
                                          :external_created_at, :story_sender, :story_id, :external_error,
                                          :translations, :in_reply_to_external_id, :is_unsupported,
                                          :is_reaction, :is_edited, :previous_content], coder: JSON
@@ -137,9 +144,9 @@ class Message < ApplicationRecord
   has_one :csat_survey_response, dependent: :destroy_async
   has_many :notifications, as: :primary_actor, dependent: :destroy_async
 
-  after_create_commit :execute_after_create_commit_callbacks
-  after_create_commit :publish_message_created
-  after_create_commit :sync_message_event
+  after_create_commit :execute_after_create_commit_callbacks, unless: :imported?
+  after_create_commit :publish_message_created, unless: :imported?
+  after_create_commit :sync_message_event, unless: :imported?
   after_update_commit :dispatch_update_event
   after_update_commit :publish_message_updated
   after_destroy_commit :publish_message_deleted
@@ -148,8 +155,37 @@ class Message < ApplicationRecord
     @token ||= inbox.channel.try(:page_access_token)
   end
 
+  # EVO-1551 round 6 — egress masking entrypoint.
+  # Use this — NEVER raw .content_attributes — anywhere the value crosses a
+  # server boundary (REST serializer, jbuilder, WS broadcast, outbound webhook,
+  # mailer). The Rubocop cop `Evo/NoRawContentAttributesInEgress` enforces this
+  # at CI; the regression net is spec/regression/pii_egress_invariant_spec.rb.
+  #
+  # `audience:` mirrors the two predicates in `ContactPiiMasker`:
+  #   :broadcast   — used by paths whose audience is the whole account
+  #                  (ActionCable broadcasts, outbound webhooks). Admin caller
+  #                  must NOT defeat masking because masked agents share the
+  #                  channel. Predicate: account_flag_enabled?.
+  #   :per_request — used by paths rendered in the HTTP pipeline where
+  #                  Current.user is set (REST serializers/jbuilders). Admin
+  #                  tier sees raw; agents/widget contacts see masked.
+  #                  Predicate: should_mask?.
+  def content_attributes_for_egress(audience: :broadcast)
+    masked =
+      case audience
+      when :broadcast then ContactPiiMasker.account_flag_enabled?
+      when :per_request then ContactPiiMasker.should_mask?
+      else raise ArgumentError, "unknown audience #{audience.inspect}"
+      end
+
+    return content_attributes unless masked
+
+    ContactPiiMasker.scrub_pii_content_attributes(content_attributes)
+  end
+
   def push_event_data
     data = attributes.symbolize_keys.merge(
+      content_attributes: content_attributes_for_egress,
       created_at: created_at.to_i,
       message_type: message_type_before_type_cast,
       conversation_id: conversation&.id&.to_s,
@@ -163,12 +199,18 @@ class Message < ApplicationRecord
   def conversation_push_event_data
     return {} unless conversation
 
+    # EVO-1551 round 3 / CB-6: message.created broadcasts to a mixed audience
+    # (inbox members + account_token), so mask source_id whenever the flag is
+    # on — `should_mask?` would let an admin caller leak the raw JID to every
+    # agent on the inbox.
+    source_id = conversation.contact_inbox&.source_id
+    masked_source_id = ContactPiiMasker.account_flag_enabled? ? ContactPiiMasker.mask_identifier(source_id) : source_id
     {
       id: conversation.id.to_s,
       assignee_id: conversation.assignee_id,
-      unread_count: conversation.unread_incoming_messages.count,
+      unread_count: conversation.unread_incoming_messages_count,
       last_activity_at: conversation.last_activity_at.to_i,
-      contact_inbox: conversation.contact_inbox.present? ? { source_id: conversation.contact_inbox.source_id } : {}
+      contact_inbox: conversation.contact_inbox.present? ? { source_id: masked_source_id } : {}
     }
   end
 
@@ -181,7 +223,7 @@ class Message < ApplicationRecord
   def webhook_data
     data = {
       additional_attributes: additional_attributes,
-      content_attributes: content_attributes,
+      content_attributes: content_attributes_for_egress,
       content_type: content_type,
       content: content,
       conversation: conversation.webhook_data,
@@ -441,7 +483,7 @@ class Message < ApplicationRecord
   end
 
   def email_notifiable_channel?
-    email_notifiable_webwidget? || %w[Email].include?(inbox.inbox_type) || email_notifiable_api_channel?
+    email_notifiable_webwidget? || %w[Email SendGrid].include?(inbox.inbox_type) || email_notifiable_api_channel?
   end
 
   def can_notify_via_mail?
@@ -459,6 +501,7 @@ class Message < ApplicationRecord
   end
 
   def trigger_notify_via_mail
+    return Sendgrid::SendEmailWorker.perform_in(1.second, id) if inbox.inbox_type == 'SendGrid'
     return EmailReplyWorker.perform_in(1.second, id) if inbox.inbox_type == 'Email'
 
     # will set a redis key for the conversation so that we don't need to send email for every new message

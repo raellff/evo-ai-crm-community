@@ -4,27 +4,27 @@ class RemoveSlaSystem < ActiveRecord::Migration[7.0]
   def up
     # Remove foreign key constraints first
     if foreign_key_exists?(:conversations, :sla_policies)
-      remove_foreign_key :conversations, :sla_policies
+      remove_foreign_key :conversations, :sla_policies, if_exists: true
     end
 
     if foreign_key_exists?(:sla_events, :sla_policies)
-      remove_foreign_key :sla_events, :sla_policies
+      remove_foreign_key :sla_events, :sla_policies, if_exists: true
     end
 
     if foreign_key_exists?(:sla_events, :applied_slas)
-      remove_foreign_key :sla_events, :applied_slas
+      remove_foreign_key :sla_events, :applied_slas, if_exists: true
     end
 
     if foreign_key_exists?(:sla_events, :conversations)
-      remove_foreign_key :sla_events, :conversations
+      remove_foreign_key :sla_events, :conversations, if_exists: true
     end
 
     if foreign_key_exists?(:applied_slas, :sla_policies)
-      remove_foreign_key :applied_slas, :sla_policies
+      remove_foreign_key :applied_slas, :sla_policies, if_exists: true
     end
 
     if foreign_key_exists?(:applied_slas, :conversations)
-      remove_foreign_key :applied_slas, :conversations
+      remove_foreign_key :applied_slas, :conversations, if_exists: true
     end
 
     # Remove indexes
@@ -36,12 +36,12 @@ class RemoveSlaSystem < ActiveRecord::Migration[7.0]
     remove_index :applied_slas, :conversation_id if index_exists?(:applied_slas, :conversation_id)
     remove_index :applied_slas, :sla_policy_id if index_exists?(:applied_slas, :sla_policy_id)
     # Drop tables
-    drop_table :sla_events if table_exists?(:sla_events)
-    drop_table :applied_slas if table_exists?(:applied_slas)
-    drop_table :sla_policies if table_exists?(:sla_policies)
+    drop_table :sla_events, if_exists: true if table_exists?(:sla_events)
+    drop_table :applied_slas, if_exists: true if table_exists?(:applied_slas)
+    drop_table :sla_policies, if_exists: true if table_exists?(:sla_policies)
 
     # Remove column from conversations table
-    remove_column :conversations, :sla_policy_id, :uuid if column_exists?(:conversations, :sla_policy_id)
+    remove_column :conversations, :sla_policy_id, :uuid, if_exists: true if column_exists?(:conversations, :sla_policy_id)
   end
 
   def down

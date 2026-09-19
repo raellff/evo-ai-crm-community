@@ -23,7 +23,10 @@ module AutomationRules
 
       canned_id = params[0].is_a?(Hash) ? (params[0][:canned_response_id] || params[0]['canned_response_id']) : params[0]
       canned = CannedResponse.find_by(id: canned_id)
-      return unless canned
+      unless canned
+        log_canned_response_not_found(canned_id)
+        return
+      end
 
       message_params = {
         content: canned.content,
@@ -39,62 +42,58 @@ module AutomationRules
       Messages::MessageBuilder.new(nil, @conversation, message_params).perform
     end
 
+    def log_canned_response_not_found(canned_id)
+      Rails.logger.warn "Automation Rule #{@rule.id}: Canned response #{canned_id.inspect} not found; skipping send_canned_response for conversation #{@conversation.id}"
+    end
+
     def send_template(params)
       return if conversation_a_tweet?
       return if params.blank?
 
       template_params = params[0].is_a?(Hash) ? params[0].deep_stringify_keys : nil
-      return if template_params.blank? || template_params['name'].blank?
+      # Accept an id-only payload (EVO-1235): the id is the canonical key, name is
+      # only the legacy fallback.
+      return if template_params.blank? || template_action_target_missing?(template_params)
 
       message_params = {
         content: '',
         private: false,
         message_type: 'outgoing',
-        template_params: resolve_template_params(template_params.except('template_id')),
+        template_params: resolve_template_params(normalize_template_id(template_params)),
         content_attributes: { automation_rule_id: @rule.id }
       }
 
       Messages::MessageBuilder.new(nil, @conversation, message_params).perform
     end
 
+    # True when an automation template action carries no usable target — neither a
+    # name (legacy) nor an id (canonical, EVO-1235).
+    def template_action_target_missing?(template_params)
+      template_params['name'].blank? && template_params['template_id'].blank? && template_params['id'].blank?
+    end
+
+    # Maps the legacy `template_id` key onto `id` (what MessageBuilder/SendResolver
+    # read) so automations resolve templates by id, global-aware (EVO-1235).
+    def normalize_template_id(template_params)
+      id = template_params['id'] || template_params['template_id']
+      normalized = template_params.except('template_id')
+      normalized['id'] = id if id.present?
+      normalized
+    end
+
+    # Resolution lives in TemplateVariableResolver (shared with
+    # Messages::MessageBuilder — EVO-1267). The variables_resolved flag stops
+    # the builder from running a second pass over values that may now contain
+    # user-originated text (a contact named "{{contact.email}}" must not
+    # re-expand downstream).
     def resolve_template_params(template_params)
       processed_params = template_params['processed_params']
       return template_params unless processed_params.is_a?(Hash)
 
       template_params.merge(
-        'processed_params' => processed_params.transform_values { |value| resolve_template_value(value) }
+        'processed_params' => TemplateVariableResolver.new(@conversation).resolve_params(processed_params),
+        'variables_resolved' => true
       )
-    end
-
-    def resolve_template_value(value)
-      return value unless value.is_a?(String)
-
-      value.gsub(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/) do
-        resolved = resolve_template_path(Regexp.last_match(1))
-        resolved.nil? ? '' : resolved.to_s
-      end
-    end
-
-    def resolve_template_path(path)
-      root, *segments = path.split('.')
-      source = case root
-               when 'contact'
-                 @conversation.contact
-               when 'conversation'
-                 @conversation
-               else
-                 return nil
-               end
-
-      segments.reduce(source) do |current, segment|
-        return nil if current.blank?
-
-        if current.respond_to?(segment)
-          current.public_send(segment)
-        elsif current.respond_to?(:[])
-          current[segment] || current[segment.to_sym]
-        end
-      end
     end
   end
 end

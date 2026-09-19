@@ -1,6 +1,15 @@
 class Api::V1::EvolutionGo::AuthorizationsController < Api::V1::BaseController
   include EvolutionGoConcern
 
+  require_permissions({
+    create: 'inboxes.create',
+    connect: 'inboxes.update',
+    qrcode: 'inboxes.read',
+    fetch: 'inboxes.read',
+    logout: 'inboxes.update',
+    delete_instance: 'inboxes.delete'
+  })
+
   before_action :set_instance_params, only: [:create, :connect, :qrcode, :fetch, :logout, :delete_instance]
 
   # CREATE INSTANCE - POST /instance/create

@@ -24,10 +24,12 @@ class InboxPolicy < ApplicationPolicy
     # FIXME: for agent bots, lets bring this validation to policies as well in future
     return true if @user.is_a?(AgentBot)
 
-    # Administrators or users with inboxes.read permission can view any inbox
-    return true if @user&.administrator? || @user&.has_permission?('inboxes.read')
+    # Admins or users granted `conversations.read_all` (resolved into Current by
+    # EvoAuthConcern) can view any inbox.
+    return true if @user&.administrator? || Current.evo_can_read_all_inboxes
 
-    # Regular users can only view assigned inboxes
+    # Restricted users can only view their assigned inboxes; a user with no
+    # membership and no conversations.read_all grant sees none.
     Current.user&.assigned_inboxes&.include?(record) || false
   end
 
@@ -96,6 +98,12 @@ class InboxPolicy < ApplicationPolicy
 
   # Generic message templates (for all channel types)
   def message_templates?
+    # s2s callers (evo-flow journey nodes, EVO-1255) list an inbox's templates
+    # with the service token — the same trust level that already allows global
+    # template CRUD via ?global=true. Without this, pundit_user carries a nil
+    # user and the call 500s.
+    return true if service_authenticated?
+
     @user.administrator? || @user.has_permission?('inboxes.message_templates')
   end
 

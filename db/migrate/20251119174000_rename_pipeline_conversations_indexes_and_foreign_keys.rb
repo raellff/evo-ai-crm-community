@@ -22,34 +22,34 @@ class RenamePipelineConversationsIndexesAndForeignKeys < ActiveRecord::Migration
 
     # Remover foreign keys antigas
     if foreign_key_exists?(:pipeline_items, name: 'fk_rails_pipeline_conversations_conversations')
-      remove_foreign_key :pipeline_items, name: 'fk_rails_pipeline_conversations_conversations'
+      remove_foreign_key :pipeline_items, name: 'fk_rails_pipeline_conversations_conversations', if_exists: true
     elsif foreign_key_exists?(:pipeline_items, :conversations)
-      remove_foreign_key :pipeline_items, :conversations
+      remove_foreign_key :pipeline_items, :conversations, if_exists: true
     end
 
     if foreign_key_exists?(:pipeline_items, name: 'fk_rails_pipeline_conversations_pipeline_stages')
-      remove_foreign_key :pipeline_items, name: 'fk_rails_pipeline_conversations_pipeline_stages'
+      remove_foreign_key :pipeline_items, name: 'fk_rails_pipeline_conversations_pipeline_stages', if_exists: true
     elsif foreign_key_exists?(:pipeline_items, :pipeline_stages)
-      remove_foreign_key :pipeline_items, :pipeline_stages
+      remove_foreign_key :pipeline_items, :pipeline_stages, if_exists: true
     end
 
     if foreign_key_exists?(:pipeline_items, name: 'fk_rails_pipeline_conversations_pipelines')
-      remove_foreign_key :pipeline_items, name: 'fk_rails_pipeline_conversations_pipelines'
+      remove_foreign_key :pipeline_items, name: 'fk_rails_pipeline_conversations_pipelines', if_exists: true
     elsif foreign_key_exists?(:pipeline_items, :pipelines)
-      remove_foreign_key :pipeline_items, :pipelines
+      remove_foreign_key :pipeline_items, :pipelines, if_exists: true
     end
 
     if foreign_key_exists?(:stage_movements, name: 'fk_rails_stage_movements_pipeline_conversations')
-      remove_foreign_key :stage_movements, name: 'fk_rails_stage_movements_pipeline_conversations'
+      remove_foreign_key :stage_movements, name: 'fk_rails_stage_movements_pipeline_conversations', if_exists: true
     elsif foreign_key_exists?(:stage_movements, column: :pipeline_conversation_id)
-      remove_foreign_key :stage_movements, column: :pipeline_conversation_id
+      remove_foreign_key :stage_movements, column: :pipeline_conversation_id, if_exists: true
     end
 
     # Adicionar foreign keys com novo nome
-    add_foreign_key :pipeline_items, :conversations, column: :conversation_id unless foreign_key_exists?(:pipeline_items, :conversations)
-    add_foreign_key :pipeline_items, :pipeline_stages, column: :pipeline_stage_id unless foreign_key_exists?(:pipeline_items, :pipeline_stages)
-    add_foreign_key :pipeline_items, :pipelines, column: :pipeline_id unless foreign_key_exists?(:pipeline_items, :pipelines)
-    add_foreign_key :pipeline_items, :contacts, column: :contact_id unless foreign_key_exists?(:pipeline_items, :contacts)
-    add_foreign_key :stage_movements, :pipeline_items, column: :pipeline_item_id unless foreign_key_exists?(:stage_movements, :pipeline_items)
+    add_foreign_key :pipeline_items, :conversations, column: :conversation_id, if_not_exists: true unless foreign_key_exists?(:pipeline_items, :conversations)
+    add_foreign_key :pipeline_items, :pipeline_stages, column: :pipeline_stage_id, if_not_exists: true unless foreign_key_exists?(:pipeline_items, :pipeline_stages)
+    add_foreign_key :pipeline_items, :pipelines, column: :pipeline_id, if_not_exists: true unless foreign_key_exists?(:pipeline_items, :pipelines)
+    add_foreign_key :pipeline_items, :contacts, column: :contact_id, if_not_exists: true unless foreign_key_exists?(:pipeline_items, :contacts)
+    add_foreign_key :stage_movements, :pipeline_items, column: :pipeline_item_id, if_not_exists: true unless foreign_key_exists?(:stage_movements, :pipeline_items)
   end
 end

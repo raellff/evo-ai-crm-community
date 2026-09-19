@@ -2,11 +2,8 @@
 GlobalConfig.clear_cache
 ConfigLoader.new.process
 
-## Seeds productions
-if Rails.env.production?
-  # Setup Onboarding flow
-  Redis::Alfred.set(Redis::Alfred::EVOLUTION_INSTALLATION_ONBOARDING, true)
-end
+# NOTE: the CRM has no onboarding flow of its own (EVO-2014). The first admin is
+# created by the evo-auth-service /setup wizard and synced here on login.
 
 ## Seeds for Local Development
 unless Rails.env.production?

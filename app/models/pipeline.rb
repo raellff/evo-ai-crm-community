@@ -28,23 +28,34 @@ class Pipeline < ApplicationRecord
   has_many :pipeline_items, dependent: :destroy
   has_many :conversations, through: :pipeline_items
   has_many :pipeline_service_definitions, dependent: :nullify
+  # EVO-2222: teams a `team`-visible pipeline is shared with. `team_ids=` (from the
+  # has_many :through) lets create/update persist the picker's selection.
+  has_many :pipeline_teams, dependent: :destroy
+  has_many :teams, through: :pipeline_teams
 
   validates :name, presence: true, uniqueness: { scope: :account_id }
   validates :pipeline_type, inclusion: { in: VALID_TYPES }
 
-  enum visibility: { private: 0, team: 1, public: 2 }, _prefix: :visibility
+  enum :visibility, { private: 0, team: 1, public: 2 }, prefix: :visibility
 
   scope :active, -> { where(is_active: true) }
   scope :default, -> { where(is_default: true) }
   scope :accessible_by, lambda { |user|
+    # EVO-2222: `team` visibility grants access to the members of the pipeline's teams.
+    # Nested subquery rather than user.team_ids keeps this to one round-trip; a user in
+    # no team yields an empty set, so the branch needs no special case.
+    team_pipeline_ids = PipelineTeam.where(team_id: TeamMember.where(user_id: user&.id).select(:team_id))
+                                    .select(:pipeline_id)
     where(visibility: :public)
       .or(where(created_by: user))
       .or(where(is_default: true))
+      .or(where(visibility: :team, id: team_pipeline_ids))
   }
 
   before_validation :set_default_custom_fields
   before_save :ensure_single_default_per_account, if: :is_default?
   after_update :cleanup_removed_attributes_from_items
+  after_save :drop_team_links_unless_team_visible
 
   def add_conversation(conversation, stage = nil, user = nil)
     stage ||= pipeline_stages.first
@@ -78,6 +89,22 @@ class Pipeline < ApplicationRecord
                    .count('pipeline_items.id')
   end
 
+  # Valor TOTAL do funil = soma dos serviços (custom_fields.services) de cada item.
+  # É o mesmo número que a UI mostra no header ("Valor Total R$X"). O stats só trazia
+  # CONTAGEM; sem isto, qualquer relatório financeiro (inclusive o do assistente) conclui
+  # "não há valores". services_total_value já existe no PipelineItem.
+  def total_value
+    pipeline_items.sum(&:services_total_value)
+  end
+
+  # Valor agregado POR ETAPA (stage_id/name => soma dos serviços dos itens daquela etapa).
+  # Espelha stage_counts, mas com dinheiro em vez de contagem.
+  def stage_values
+    pipeline_stages.each_with_object({}) do |stage, acc|
+      acc[stage.name] = stage.pipeline_items.sum(&:services_total_value)
+    end
+  end
+
   def push_event_data
     {
       id: id,
@@ -90,6 +117,14 @@ class Pipeline < ApplicationRecord
   end
 
   private
+
+  # Rows left behind would grant access again the day the pipeline goes back to `team`,
+  # to teams nobody re-picked.
+  def drop_team_links_unless_team_visible
+    return if visibility_team?
+
+    pipeline_teams.destroy_all if pipeline_teams.exists?
+  end
 
   def ensure_single_default_per_account
     # Desativa outros pipelines default quando este for ativado

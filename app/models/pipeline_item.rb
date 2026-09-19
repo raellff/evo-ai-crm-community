@@ -39,6 +39,14 @@ class PipelineItem < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :assigned_by, class_name: 'User', optional: true
 
+  # Um item é OU por-contato (lead, conversation_id nil) OU por-conversa. Quando uma conversa
+  # PROMOVE um lead-card (Conversation#promote_lead_card seta conversation_id e LIMPA contact_id),
+  # o contato passa a vir da conversa. Este accessor faz o card-de-conversa ainda responder
+  # `.contact` (readers como StageInactivityTargetResolver dependem disso).
+  def contact
+    super || conversation&.contact
+  end
+
   has_many :stage_movements, dependent: :destroy
   has_many :tasks, class_name: 'PipelineTask', dependent: :destroy
   has_many :pipeline_item_products, dependent: :destroy
@@ -59,7 +67,16 @@ class PipelineItem < ApplicationRecord
   # on rollback.
   after_create_commit :publish_pipeline_item_created
   after_create :dispatch_initial_stage_event
+  # EVO-1266: Wisper broadcast for journey-trigger consumption is
+  # post-commit so rollbacks don't leak orphan Sidekiq jobs (mirrors
+  # publish_pipeline_item_created above). The pre-commit
+  # `dispatch_initial_stage_event` / `create_stage_change_movement`
+  # below keep firing the legacy `Rails.configuration.dispatcher`
+  # event for AutomationRules — its in-transaction execution is an
+  # AC of that pre-existing path.
+  after_create_commit :broadcast_stage_update_to_evo_flow
   after_update :create_stage_change_movement, if: :saved_change_to_pipeline_stage_id?
+  after_update_commit :broadcast_stage_update_to_evo_flow, if: :saved_change_to_pipeline_stage_id?
   after_update :publish_pipeline_item_updated
   after_update :publish_pipeline_item_completed, if: :saved_change_to_completed_at?
   after_destroy :publish_pipeline_item_deleted
@@ -86,7 +103,15 @@ class PipelineItem < ApplicationRecord
   end
 
   def days_in_current_stage
-    last_movement = stage_movements.order(:created_at).last
+    # Read from the loaded association in memory (max_by) instead of
+    # `order(:created_at).last`, which re-queries even when stage_movements is
+    # eager-loaded — an N+1 when serializing many items. Falls back to a query
+    # if not preloaded.
+    last_movement = if stage_movements.loaded?
+                      stage_movements.max_by(&:created_at)
+                    else
+                      stage_movements.order(:created_at).last
+                    end
     start_time = last_movement&.created_at || entered_at
     ((Time.current - start_time) / 1.day).round
   end
@@ -328,6 +353,11 @@ class PipelineItem < ApplicationRecord
       )
     end
 
+    # Stage changed → the "stuck in stage" clock restarts, so wipe any
+    # stage_stagnation inactivity executions for this item (reply executions are
+    # left intact — they reset on incoming messages instead).
+    StageInactivityExecution.reset_for_item(id, base: 'stage_stagnation')
+
     # Trigger automation event for pipeline stage update
     Rails.configuration.dispatcher.dispatch(
       'pipeline_stage_updated',
@@ -343,6 +373,29 @@ class PipelineItem < ApplicationRecord
       Time.zone.now,
       pipeline_item: self,
       changed_attributes: { 'pipeline_stage_id' => [nil, pipeline_stage_id] }
+    )
+  end
+
+  # EVO-1266: post-commit Wisper broadcast that EvoFlow::PipelineEventsListener
+  # consumes to publish the canonical pipeline.stage_changed event to evo-flow
+  # for journey trigger matching. Runs after both `after_create_commit` (initial
+  # stage assignment — old = nil) and `after_update_commit` (subsequent stage
+  # change). Resolves the from/to ids from the dirty-tracking attribute API,
+  # which remains valid in the *_commit lifecycle.
+  def broadcast_stage_update_to_evo_flow
+    old_stage_id, new_stage_id =
+      if saved_change_to_pipeline_stage_id?
+        saved_change_to_pipeline_stage_id
+      else
+        [nil, pipeline_stage_id]
+      end
+
+    publish(
+      :pipeline_stage_updated,
+      data: {
+        pipeline_item: self,
+        changed_attributes: { 'pipeline_stage_id' => [old_stage_id, new_stage_id] }
+      }
     )
   end
 

@@ -1,4 +1,8 @@
 class Api::V1::Evolution::HealthController < Api::V1::BaseController
+  require_permissions({
+    show: 'inboxes.read'
+  })
+
   TIMEOUT_SECONDS = 5
 
   def show

@@ -23,11 +23,22 @@ module ContactSerializer
   #
   # @return [Hash] Serialized contact ready for Oj
   #
-  def serialize(contact, include_contact_inboxes: false, include_labels: true, include_companies: false, include_pipelines: false)
+  def serialize(contact, include_contact_inboxes: false, include_labels: true, include_companies: false, include_pipelines: false, labels_by_title: nil)
     result = contact.as_json(
       only: [:id, :name, :type, :email, :phone_number, :identifier, :blocked,
              :availability_status, :tax_id, :website, :industry],
     )
+
+    # EVO-1551: mask PII server-side when the account flag is on AND the current
+    # user is not an admin. Defence-in-depth alongside the frontend hook — without
+    # this, the Network tab still leaks the raw values even though the UI hides
+    # them.
+    if ContactPiiMasker.should_mask?
+      result['email'] = ContactPiiMasker.mask_email(result['email'])
+      result['phone_number'] = ContactPiiMasker.mask_phone(result['phone_number'])
+      result['identifier'] = ContactPiiMasker.mask_identifier(result['identifier'])
+      result['name'] = ContactPiiMasker.mask_phone_like_name(result['name'])
+    end
 
     # Add computed fields
     result['additional_attributes'] = contact.additional_attributes || {}
@@ -40,17 +51,18 @@ module ContactSerializer
 
     # Conditionally include labels
     if include_labels
-      result['labels'] = contact.labels.map do |tag|
-        label = Label.find_by(title: tag.name)
-        { name: tag.name, color: label&.color || '#1f93ff' }
-      end
+      result['labels'] = serialize_labels(contact, labels_by_title)
     end
 
     # Conditionally include contact_inboxes
     if include_contact_inboxes
+      mask_source_id = ContactPiiMasker.should_mask?
       result['contact_inboxes'] = contact.contact_inboxes.select { |ci| ci.inbox.present? }.map do |ci|
         {
-          source_id: ci.source_id,
+          # source_id carries the channel-specific identifier (phone JID for
+          # WhatsApp, email for IMAP, etc.). Mask via the identifier helper so
+          # both phone- and email-shaped values are hidden uniformly.
+          source_id: mask_source_id ? ContactPiiMasker.mask_identifier(ci.source_id) : ci.source_id,
           inbox: {
             id: ci.inbox.id,
             name: ci.inbox.name,
@@ -62,14 +74,15 @@ module ContactSerializer
 
     # Conditionally include companies/persons
     if include_companies
+      mask_related = ContactPiiMasker.should_mask?
       if contact.type == 'person'
         result['companies'] = contact.companies.map do |company|
           {
             id: company.id,
             name: company.name,
             type: company.type,
-            email: company.email,
-            phone_number: company.phone_number,
+            email: mask_related ? ContactPiiMasker.mask_email(company.email) : company.email,
+            phone_number: mask_related ? ContactPiiMasker.mask_phone(company.phone_number) : company.phone_number,
             thumbnail: company.avatar_url.presence
           }
         end
@@ -79,8 +92,8 @@ module ContactSerializer
             id: person.id,
             name: person.name,
             type: person.type,
-            email: person.email,
-            phone_number: person.phone_number,
+            email: mask_related ? ContactPiiMasker.mask_email(person.email) : person.email,
+            phone_number: mask_related ? ContactPiiMasker.mask_phone(person.phone_number) : person.phone_number,
             thumbnail: person.avatar_url.presence
           }
         end
@@ -107,10 +120,26 @@ module ContactSerializer
   def serialize_collection(contacts, **options)
     return [] unless contacts
 
-    contacts.map { |contact| serialize(contact, **options) }
+    labels_by_title = options.fetch(:include_labels, true) ? labels_by_title_for(contacts) : nil
+
+    contacts.map { |contact| serialize(contact, labels_by_title: labels_by_title, **options) }
   end
 
   private
+
+  def labels_by_title_for(contacts)
+    titles = contacts.flat_map { |contact| contact.labels.map(&:name) }.uniq
+    return {} if titles.empty?
+
+    Label.where(title: titles).index_by(&:title)
+  end
+
+  def serialize_labels(contact, labels_by_title)
+    contact.labels.map do |tag|
+      label = labels_by_title ? labels_by_title[tag.name] : Label.find_by(title: tag.name)
+      { name: tag.name, color: label&.color || '#1f93ff' }
+    end
+  end
 
   # Serialize pipeline data for a contact
   def serialize_pipelines(contact)

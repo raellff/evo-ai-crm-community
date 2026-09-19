@@ -24,5 +24,5 @@ class NotificationSubscription < ApplicationRecord
     fcm: 2
   }.freeze
 
-  enum subscription_type: SUBSCRIPTION_TYPES
+  enum :subscription_type, SUBSCRIPTION_TYPES
 end

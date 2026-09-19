@@ -25,8 +25,9 @@ module InboxSerializer
     # It will be conditionally added later only for administrators
     result = inbox.as_json(
       only: [:id, :channel_id, :name, :display_name, :channel_type, :greeting_enabled,
-             :greeting_message, :enable_email_collect, :csat_survey_enabled,
+             :greeting_message, :greeting_message_template_id, :enable_email_collect, :csat_survey_enabled,
              :enable_auto_assignment, :working_hours_enabled, :out_of_office_message,
+             :out_of_office_message_template_id,
              :timezone, :allow_messages_after_resolved, :auto_assignment_config,
              :business_name, :portal_id,
              :sender_name_type, :additional_attributes, :csat_config,
@@ -46,6 +47,14 @@ module InboxSerializer
       # Provider (used by WhatsApp and other channels)
       result['provider'] = inbox.channel.provider if inbox.channel.respond_to?(:provider)
 
+      # Live channel health (EVO-1674): state enums + timestamps only, never
+      # tokens or provider payloads.
+      health = Channels::ConnectionStateResolver.call(inbox.channel)
+      result['connection_state'] = health[:state]
+      result['health_source'] = health[:source]
+      result['last_sync'] = health[:last_sync]&.to_i
+      result['reauthorization_required'] = health[:reauthorization_required]
+
       # WhatsApp-specific data required by channel settings screens
       if inbox.whatsapp?
         result['provider_config'] = inbox.channel.try(:provider_config)
@@ -59,6 +68,18 @@ module InboxSerializer
         result['inbox_identifier'] = inbox.channel.identifier
         result['additional_attributes'] = inbox.channel.additional_attributes
         result['hmac_token'] = inbox.channel.hmac_token if Current.user&.role == 'administrator'
+      end
+
+      # SendGrid specific fields
+      # 🔒 SECURITY: never expose api_key / api_key_encrypted; only signal presence
+      if inbox.sendgrid?
+        result['from_email'] = inbox.channel.from_email
+        result['from_name'] = inbox.channel.from_name
+        result['reply_to'] = inbox.channel.reply_to
+        result['sender_domain'] = inbox.channel.sender_domain
+        result['email_signature'] = inbox.channel.email_signature
+        result['api_key_present'] = inbox.channel.api_key.present?
+        result['webhook_registration_status'] = inbox.channel.webhook_registration_status
       end
 
       # WebWidget specific fields
@@ -80,9 +101,11 @@ module InboxSerializer
       end
 
       # Include full channel if requested
-      # 🔒 SECURITY: Exclude hmac_token from channel serialization to prevent exposure
+      # 🔒 SECURITY: Exclude hmac_token and api_key_encrypted from channel serialization to prevent exposure
       if include_channel
-        channel_data = inbox.channel.as_json(except: [:created_at, :updated_at, :hmac_token])
+        channel_except = [:created_at, :updated_at, :hmac_token]
+        channel_except << :api_key_encrypted if inbox.channel.respond_to?(:api_key_encrypted)
+        channel_data = inbox.channel.as_json(except: channel_except)
         # Only include hmac_token if user is administrator
         if Current.user&.role == 'administrator' && inbox.channel.respond_to?(:hmac_token)
           channel_data['hmac_token'] = inbox.channel.hmac_token

@@ -95,7 +95,16 @@ module OauthAuthorizationHelper
   def authenticate_oauth_token!
     doorkeeper_authorize!
     @resource = current_resource_owner
-    Current.user = @resource if @resource
+    return unless @resource
+
+    Current.user = @resource
+    # Inbox visibility is permission-driven (User#assigned_inboxes): without
+    # this flag every OAuth caller — admins included — would be scoped to
+    # explicit inbox memberships. Mirrors EvoAuthConcern for bearer tokens;
+    # admin roles hold conversations.read_all via the seed, so the single
+    # remote check (request-cached) covers them too.
+    Current.evo_permission_cache ||= {}
+    Current.evo_can_read_all_inboxes = has_user_permission?(@resource.id, 'conversations.read_all')
   end
 
   def validate_oauth_scope!(required_scope = nil)

@@ -1,11 +1,15 @@
 class Api::V1::LabelsController < Api::V1::BaseController
-  # Configuração de permissões - Apenas actions que realmente precisam de verificação
+  # CRM-190: index/show were ungated while `labels.read` was already granted by
+  # every seeded role, so the key enforced nothing — any authenticated user could
+  # list every label. Reading the shared label catalog is attendance, but it is
+  # still gated by its own key.
   require_permissions({
+    index: 'labels.read',
+    show: 'labels.read',
     create: 'labels.create',
-    update: 'labels.update', 
+    update: 'labels.update',
     destroy: 'labels.delete'
   })
-  # index e show são permitidos para todos (sem verificação de permissão)
 
   before_action :fetch_label, except: [:index, :create]
 
@@ -64,9 +68,13 @@ class Api::V1::LabelsController < Api::V1::BaseController
   end
 
   def destroy
-    @label.destroy
+    deleted_id = @label.id
+    ActiveRecord::Base.transaction do
+      Labels::DeleteService.new(label_title: @label.title).perform
+      @label.destroy!
+    end
     success_response(
-      data: { id: @label.id },
+      data: { id: deleted_id },
       message: 'Label deleted successfully'
     )
   end
@@ -77,8 +85,8 @@ class Api::V1::LabelsController < Api::V1::BaseController
     @label = Label.all.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     error_response(
-      code: ApiErrorCodes::LABEL_NOT_FOUND,
-      message: "Label with id #{params[:id]} not found",
+      ApiErrorCodes::LABEL_NOT_FOUND,
+      "Label with id #{params[:id]} not found",
       status: :not_found
     )
   end

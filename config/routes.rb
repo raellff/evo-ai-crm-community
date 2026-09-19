@@ -4,8 +4,11 @@ Rails.application.routes.draw do
   get '/metrics', to: 'health#metrics'
   post '/api/v1/dynamic_oauth/validate_client', to: 'api/v1/dynamic_oauth#validate_dynamic_client'
 
-  ## renders the frontend paths only if its not an api only server
-  if ActiveModel::Type::Boolean.new.cast(ENV.fetch('EVOLUTION_API_ONLY_SERVER', false))
+  ## Renders the frontend paths only if this is not an API-only server.
+  ## Default true: this backend is API-only (vite_rails removed); the SPA is served
+  ## by the separate evo-frontend service. With default false the backend registered
+  ## root->dashboard#index and tried to render the missing 'vueapp' layout -> HTTP 406.
+  if ActiveModel::Type::Boolean.new.cast(ENV.fetch('EVOLUTION_API_ONLY_SERVER', true))
     root to: 'api#index'
   else
     root to: 'dashboard#index'
@@ -22,9 +25,11 @@ Rails.application.routes.draw do
     get '/app/settings/inboxes/new/:inbox_id/agents', to: 'dashboard#index', as: 'app_whatsapp_inbox_agents'
     get '/app/settings/inboxes/:inbox_id', to: 'dashboard#index', as: 'app_instagram_inbox_settings'
     get '/app/settings/inboxes/:inbox_id', to: 'dashboard#index', as: 'app_email_inbox_settings'
-
-    resource :slack_uploads, only: [:show]
   end
+
+  ## Slack fetches these avatar/attachment URLs directly (not the SPA), so the route
+  ## must exist even when the backend is API-only.
+  resource :slack_uploads, only: [:show]
 
   get '/api', to: 'api#index'
   namespace :api, defaults: { format: 'json' } do
@@ -37,7 +42,11 @@ Rails.application.routes.draw do
       end
 
       resource :global_config, controller: 'global_config', only: [:show]
+      get 'ai_credentials/migration_state', to: 'ai_credentials#migration_state'
       namespace :integrations do
+        # Session-authed availability probe: booleans only (is each provider's OAuth
+        # credential configured?), never the secret itself. See AvailabilityController.
+        get 'availability', to: 'availability#index'
         namespace :google_calendar do
           get 'credentials', to: 'credentials#show'
         end
@@ -93,12 +102,15 @@ Rails.application.routes.draw do
         post :setup_channel_provider, on: :member
         post :disconnect_channel_provider, on: :member
         post :sync_whatsapp_subscription, on: :member
+        # Discards a Hub connection that never completed. A separate door from
+        # destroy because only this one refuses an already-connected channel.
+        delete 'hub_connection', action: :abort_hub_connection, on: :member
         delete :avatar, on: :member
-        get :message_templates, on: :member
-        post :message_templates, on: :member
+        # Template CRUD moved to the dedicated flat /api/v1/message_templates
+        # endpoint (EVO-1716). Only the per-channel Meta sync stays inbox-scoped.
         post 'message_templates/sync', action: :sync_message_templates, on: :member
-        put 'message_templates/:template_id', action: :update_message_template, on: :member
-        delete 'message_templates/:template_id', action: :delete_message_template, on: :member
+        post 'message_templates/:template_id/sync_with_whatsapp_cloud',
+             action: :sync_template_with_whatsapp_cloud, on: :member
       end
 
       resources :conversations, only: [:index, :create, :show, :update, :destroy], controller: 'conversations' do
@@ -108,6 +120,8 @@ Rails.application.routes.draw do
           get :search
           post :filter
           get :available_for_pipeline
+          get :unanswered_count
+          post :import
         end
         resources :messages, only: [:index, :create, :destroy, :update], controller: 'conversations/messages' do
           member do
@@ -123,7 +137,9 @@ Rails.application.routes.draw do
           post :mute
           post :unmute
           post :transcript
+          post :email_team
           post :toggle_status
+          post :return_to_bot
           post :toggle_priority
           post :toggle_typing_status
           post :update_last_seen
@@ -153,7 +169,11 @@ Rails.application.routes.draw do
         delete :avatar, on: :member
       end
 
-      resources :canned_responses, only: [:index, :create, :update, :destroy], controller: 'canned_responses'
+      resources :canned_responses, only: [:index, :show, :create, :update, :destroy], controller: 'canned_responses'
+
+      # Dedicated, account-scoped message templates CRUD (global + channel-bound).
+      # Channel-bound ops pass inbox_id; Meta sync stays on the inbox routes. (EVO-1716)
+      resources :message_templates, only: [:index, :show, :create, :update, :destroy], controller: 'message_templates'
 
       resources :facebook_comment_moderations, only: [:index, :show], controller: 'facebook_comment_moderations' do
         member do
@@ -221,6 +241,22 @@ Rails.application.routes.draw do
 
       scope module: 'evo_flow' do
         resources :contact_events, only: [:index], path: 'contacts/:contact_id/events', param: :contact_id
+        resources :segments, only: %i[index show create update destroy] do
+          member do
+            post :recompute
+            get :contact_ids, path: 'contact-ids'
+          end
+          collection do
+            post :preview
+            post :recompute_all, path: 'recompute-all'
+          end
+        end
+
+        # EVO-2188: generic passthrough proxy to evo-flow's /journeys* surface
+        # (create/list/update PATCH/delete/toggle-active/sessions/...). The frontend
+        # journey builder hits /api/v1/journeys*; without this it gets 404/405.
+        match 'journeys(/*path)', to: 'journeys#proxy',
+              via: %i[get post put patch delete], format: false
       end
 
       resources :csat_survey_responses, only: [:index], controller: 'csat_survey_responses' do
@@ -240,8 +276,39 @@ Rails.application.routes.draw do
 
       # Product Catalog (EVO-1109)
       resources :products, only: [:index, :create, :show, :update, :destroy], controller: 'products' do
+        # Bulk import endpoint (EVO-1555 S1)
+        collection do
+          post :bulk
+          # Fetch products from a remote store (Shopify/WooCommerce)
+          post :import_fetch
+        end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
       end
+
+      # Lead-capture form builder admin CRUD (B14.01).
+      resources :crm_forms, only: [:index, :create, :show, :update, :destroy], controller: 'crm_forms' do
+        get :leads, on: :member
+      end
+
+      # Chat-page builder admin CRUD (B14.08).
+      resources :chat_pages, only: [:index, :create, :show, :update, :destroy], controller: 'chat_pages'
+
+      # ERP webhook ingress (EVO-1735 S3.0) — extensible adapter registry,
+      # ships with `:noop` only. Adapter for a concrete ERP lands in S3.1
+      # when a customer pilot is contracted.
+      namespace :webhooks do
+        post 'erp/:provider', to: 'erp#receive', as: :erp_webhook
+        # Purchase webhook ingress (lead capture): an approved purchase from a
+        # registered payment platform becomes contact + pipeline card.
+        post 'purchases/:provider', to: 'purchases#receive', as: :purchase_webhook
+      end
+
+      # Authenticated CONFIG surface of the purchase-webhook ingress (CRM-493):
+      # the pipeline screen lists the platforms and mints the signed URL the
+      # operator registers at one. Deliberately outside `namespace :webhooks`
+      # (that one is the unauthenticated delivery ingress).
+      get 'purchase_webhooks/providers', to: 'purchase_webhooks#providers'
+      get 'purchase_webhooks/url', to: 'purchase_webhooks#url'
 
       # Attach/detach products to AI agents (agent lives in evo_core; we only
       # track the join here and propagate to agent.config via
@@ -268,7 +335,6 @@ Rails.application.routes.draw do
           get :conversations
           get :messages
           get :contacts
-          get :articles
         end
       end
 
@@ -303,8 +369,8 @@ Rails.application.routes.draw do
           post 'facebook/feed', to: 'webhooks/facebook#feed_events'
 
           # Twitter webhooks
-          get 'twitter', to: 'api/v1/webhooks#twitter_crc'
-          post 'twitter', to: 'api/v1/webhooks#twitter_events'
+          get 'twitter', to: '/api/v1/webhooks#twitter_crc'
+          post 'twitter', to: '/api/v1/webhooks#twitter_events'
 
           # Gmail webhooks
           post 'gmail/pubsub', to: 'webhooks/gmail#pubsub'
@@ -352,10 +418,6 @@ Rails.application.routes.draw do
       end
 
       resources :working_hours, only: [:update], controller: 'working_hours'
-
-      scope path: 'twitter', as: 'twitter' do
-        resource :authorization, only: [:create], controller: 'twitter/authorizations'
-      end
 
       scope path: 'microsoft', as: 'microsoft' do
         resource :authorization, only: [:create], controller: 'microsoft/authorizations'
@@ -521,6 +583,8 @@ Rails.application.routes.draw do
         end
       end
 
+      post 'pipeline_tasks/for_conversation', to: 'pipeline_tasks#for_conversation'
+
       resources :pipelines, controller: 'pipelines' do
         collection do
           get :stats
@@ -531,6 +595,7 @@ Rails.application.routes.draw do
           patch :archive
           patch :set_as_default
           get :stats
+          get :dependents
         end
         resources :pipeline_stages, except: [:new, :edit], controller: 'pipeline_stages' do
           member do
@@ -550,6 +615,7 @@ Rails.application.routes.draw do
           end
           collection do
             patch :bulk_move
+            patch :move_conversation
             get :stats
             get :available_conversations
             get :available_contacts
@@ -586,6 +652,8 @@ Rails.application.routes.draw do
             get :plan
             get :channels
             get :available_channels
+            get :connect_info
+            post :whatsapp_connect
           end
         end
       end
@@ -634,35 +702,6 @@ Rails.application.routes.draw do
         end
       end
     end
-
-    namespace :v2 do
-      resources :summary_reports, only: [], controller: 'summary_reports' do
-        collection do
-          get :agent
-          get :team
-          get :inbox
-        end
-      end
-      resources :reports, only: [:index], controller: 'reports' do
-        collection do
-          get :summary
-          get :bot_summary
-          get :agents
-          get :inboxes
-          get :labels
-          get :teams
-          get :conversations
-          get :conversation_traffic
-          get :bot_metrics
-        end
-      end
-      resources :live_reports, only: [], controller: 'live_reports' do
-        collection do
-          get :conversation_metrics
-          get :grouped_conversation_metrics
-        end
-      end
-    end
   end
 
   namespace :public, defaults: { format: 'json' } do
@@ -679,12 +718,22 @@ Rails.application.routes.draw do
                 end
 
                 resources :messages, only: [:index, :create, :update]
+                # Dedicated outbound send: creates an :outgoing message, optionally
+                # rendered from a MessageTemplate (EVO-1235 [6.6]).
+                resources :outbound_messages, only: [:create]
               end
             end
           end
         end
 
         resources :leads, only: [:create]
+
+        # Anonymous lead-capture forms (B14.01): resolved by public slug, no API key.
+        get  'forms/:slug',             to: 'forms#show'
+        post 'forms/:slug/submissions', to: 'forms#create'
+
+        # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
+        get 'chat_pages/:slug', to: 'chat_pages#show'
 
         resources :csat_survey, only: [:show, :update]
       end
@@ -699,6 +748,7 @@ Rails.application.routes.draw do
   post 'webhooks/telegram/:bot_token', to: 'webhooks/telegram#process_payload'
   post 'webhooks/sms/:phone_number', to: 'webhooks/sms#process_payload'
   post 'webhooks/gmail/pubsub', to: 'webhooks/gmail#pubsub'
+  post 'webhooks/sendgrid', to: 'webhooks/sendgrid#create'
   get 'webhooks/whatsapp', to: 'webhooks/whatsapp#verify'
   post 'webhooks/whatsapp', to: 'webhooks/whatsapp#process_payload'
   get 'webhooks/whatsapp/:phone_number', to: 'webhooks/whatsapp#verify'
@@ -706,16 +756,16 @@ Rails.application.routes.draw do
   get 'webhooks/instagram', to: 'webhooks/instagram#verify'
   post 'webhooks/instagram', to: 'webhooks/instagram#events'
   post 'webhooks/whatsapp/evolution', to: 'webhooks/whatsapp#process_payload'
+  # EVO-2089: com WEBHOOK_BY_EVENTS=true a Evolution posta cada evento em
+  # .../evolution/<evento> (ex.: messages-upsert). :sub_event (NAO :event — path
+  # param sobrescreveria o `event` do corpo). Mesmo process_payload, que le o evento do corpo.
+  post 'webhooks/whatsapp/evolution/:sub_event', to: 'webhooks/whatsapp#process_payload'
   post 'webhooks/whatsapp/evolution_go', to: 'webhooks/whatsapp#process_evolution_go_payload'
   post 'webhooks/whatsapp/zapi', to: 'webhooks/whatsapp#process_payload'
   post 'webhooks/evolution_hub', to: 'webhooks/evolution_hub#create'
 
   # Bot Runtime postback
   post 'webhooks/bot_runtime/postback/:conversation_display_id', to: 'webhooks/bot_runtime#postback'
-
-  namespace :twitter do
-    resource :callback, only: [:show]
-  end
 
   namespace :linear do
     resource :callback, only: [:show]
@@ -734,9 +784,6 @@ Rails.application.routes.draw do
     resources :delivery_status, only: [:create]
   end
 
-  get 'microsoft/callback', to: 'microsoft/callbacks#show'
-  get 'google/callback', to: 'google/callbacks#show'
-  get 'instagram/callback', to: 'instagram/callbacks#show'
   get 'whatsapp/callback', to: 'whatsapp/callbacks#show'
   get '.well-known/assetlinks.json' => 'android_app#assetlinks'
   get '.well-known/apple-app-site-association' => 'apple_app#site_association'
@@ -745,14 +792,8 @@ Rails.application.routes.draw do
   require 'sidekiq/web'
   require 'sidekiq/cron/web'
 
-  namespace :installation do
-    get 'onboarding', to: 'onboarding#index'
-    post 'onboarding', to: 'onboarding#create'
-  end
-
   # Enterprise / consumer plugins mount their routes through the plugin_loader
   # extension point. No-op in the community release — the registry is empty
   # unless a consumer gem registers a plugin. See EXTENSION_POINTS.md §3.
   EvoExtensionPoints::PluginLoader.draw_routes(self)
-
 end

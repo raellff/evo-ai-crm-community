@@ -1,4 +1,11 @@
 class Api::V1::Conversations::ParticipantsController < Api::V1::Conversations::BaseController
+  require_permissions({
+    show: 'conversations.read',
+    create: 'conversations.update',
+    update: 'conversations.update',
+    destroy: 'conversations.update'
+  })
+
   def show
     @participants = @conversation.conversation_participants.includes(:user)
     

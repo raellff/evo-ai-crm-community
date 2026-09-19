@@ -1,4 +1,12 @@
 class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseController
+  require_permissions({
+    index: 'conversations.read',
+    create: 'conversations.update',
+    update: 'conversations.update',
+    destroy: 'conversations.update',
+    retry: 'conversations.update'
+  })
+
   before_action :ensure_api_inbox, only: :update
 
   def index
@@ -47,6 +55,7 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
   def destroy
     @message = message
     @message.update!(content_attributes: (@message.content_attributes || {}).merge(deleted: true))
+    enqueue_provider_delete(@message)
 
     success_response(
       data: MessageSerializer.serialize(@message, include_attachments: true, include_sender: true),
@@ -91,6 +100,18 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
   end
 
   private
+
+  # EVO-1891: when an agent deletes an OUTGOING message, revoke it on the provider
+  # (delete-for-everyone) where supported. Done in a background job so a slow or
+  # unreachable provider never blocks/delays the CRM soft-delete response.
+  def enqueue_provider_delete(message)
+    return unless message.outgoing?
+
+    channel = message.conversation&.inbox&.channel
+    return unless channel.respond_to?(:delete_message)
+
+    Whatsapp::DeleteMessageOnProviderJob.perform_later(message.id)
+  end
 
   def perform_status_update(target_status)
     Messages::StatusUpdateService.new(@message, target_status, permitted_params[:external_error]).perform

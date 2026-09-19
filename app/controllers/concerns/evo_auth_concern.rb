@@ -61,6 +61,19 @@ module EvoAuthConcern
 
     Current.account = resolve_account(user_data['accounts'])
     user.update!(account_id: Current.account.id) if Current.account && user.account_id != Current.account.id
+    Current.account ||= RuntimeConfig.account
+
+    # Resolve the granular `conversations.read_all` permission once per request and
+    # cache it in Current. Admin short-circuits BEFORE any remote call. Non-admins
+    # resolve via the remote evo-auth check (cached per request by the concern). The
+    # model/policy/finder read this flag (mirroring how `administrator?` reads
+    # `Current.evo_role_key`) — they never call the CRM `User#has_permission?` stub.
+    Current.evo_can_read_all_inboxes =
+      if user.administrator?
+        true
+      else
+        has_user_permission?(user.id, 'conversations.read_all')
+      end
 
     # Store tokens for downstream services
     if token_type == 'bearer'

@@ -40,8 +40,8 @@ class AgentBot < ApplicationRecord
   has_many :messages, as: :sender, dependent: :nullify
 
   before_destroy :cleanup_associations
-  enum bot_type: { webhook: 0 }
-  enum bot_provider: { webhook_provider: 'webhook', evo_ai_provider: 'evo_ai', n8n_provider: 'n8n' }
+  enum :bot_type, { webhook: 0 }
+  enum :bot_provider, { webhook_provider: 'webhook', evo_ai_provider: 'evo_ai', n8n_provider: 'n8n' }
 
   validates :outgoing_url, length: { maximum: Limits::URL_LENGTH_LIMIT }
   validates :api_key, length: { maximum: 1000 }, allow_blank: true
@@ -62,13 +62,15 @@ class AgentBot < ApplicationRecord
     }
   end
 
+  # ⚠️ NO api_key here: this hash reaches `Message#webhook_data`, which the
+  # webhook listener delivers to URLs the CUSTOMER registered. The bot's own
+  # dispatch reads the credential through AgentBots::CredentialResolution.
   def webhook_data
     {
       id: id,
       name: name,
       type: 'agent_bot',
-      outgoing_url: outgoing_url,
-      api_key: api_key
+      outgoing_url: outgoing_url
     }
   end
 

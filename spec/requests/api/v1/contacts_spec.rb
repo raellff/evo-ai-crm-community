@@ -224,6 +224,27 @@ RSpec.describe 'Api::V1::ContactsController', type: :request do
       end
     end
 
+    # EVO-2186: macro_executions has a FK to conversations with no dependent: :destroy,
+    # so destroying the conversation used to raise PG::ForeignKeyViolation -> 422.
+    context 'when contact has a conversation with macro_executions' do
+      let!(:channel_macro) { Channel::Api.create! }
+      let!(:inbox) { Inbox.create!(name: 'Test Inbox', channel: channel_macro) }
+      let!(:contact_inbox) { ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8)) }
+      let!(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox) }
+      let!(:macro) { Macro.create!(name: 'Test Macro', actions: {}, created_by: user, updated_by: user) }
+      let!(:macro_execution) { MacroExecution.create!(macro: macro, conversation: conversation, user: user) }
+
+      it 'deletes the contact without a FK violation, removing macro_executions' do
+        expect(MacroExecution.exists?(macro_execution.id)).to be true
+
+        delete "/api/v1/contacts/#{contact.id}", headers: headers
+
+        expect(response).to have_http_status(:ok)
+        expect(Contact.exists?(contact.id)).to be false
+        expect(MacroExecution.exists?(macro_execution.id)).to be false
+      end
+    end
+
     context 'when contact has both direct and conversation-linked pipeline items' do
       let!(:channel_both) { Channel::Api.create! }
       let!(:inbox) { Inbox.create!(name: 'Test Inbox', channel: channel_both) }
@@ -396,5 +417,37 @@ RSpec.describe 'Api::V1::ContactsController', type: :request do
       expect(PipelineItem.exists?(pipeline_item.id)).to be false
       expect(Contact.exists?(contact.id)).to be false
     end
+  end
+end
+
+RSpec.describe 'GET /api/v1/contacts/companies_list', type: :request do
+  let(:user) { User.create!(email: "companies-list-#{SecureRandom.hex(4)}@example.com", name: 'Test User') }
+  let(:headers) { { 'X-Service-Token' => 'spec-service-token' } }
+
+  before do
+    ENV['EVOAI_CRM_API_TOKEN'] = 'spec-service-token'
+    Current.user = user
+  end
+
+  after do
+    ENV.delete('EVOAI_CRM_API_TOKEN')
+    Current.reset
+  end
+
+  # EVO-1887: a company is a structural entity, so it must be selectable even
+  # without email/phone/identifier (previously hidden by resolved_contacts).
+  it 'returns companies without contact info' do
+    bare = Contact.create!(name: 'Bare Co', type: 'company')
+    Contact.create!(name: 'Just a person', email: "p-#{SecureRandom.hex(4)}@example.com", type: 'person')
+
+    get '/api/v1/contacts/companies_list', headers: headers
+
+    expect(response).to have_http_status(:ok)
+    payload = JSON.parse(response.body)['data']
+    names = payload.map { |c| c['name'] }
+    ids = payload.map { |c| c['id'] }
+    expect(names).to include('Bare Co')
+    expect(names).not_to include('Just a person')
+    expect(ids).to include(bare.id)
   end
 end

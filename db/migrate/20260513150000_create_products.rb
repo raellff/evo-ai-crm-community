@@ -1,6 +1,6 @@
 class CreateProducts < ActiveRecord::Migration[7.1]
   def change
-    create_table :products, id: :uuid do |t|
+    create_table :products, id: :uuid, if_not_exists: true do |t|
       t.string :name, null: false, limit: 255
       t.string :slug, limit: 255
       t.string :kind, null: false, default: 'physical', limit: 20
@@ -16,14 +16,14 @@ class CreateProducts < ActiveRecord::Migration[7.1]
       t.timestamps
     end
 
-    add_index :products, :sku, unique: true, where: 'sku IS NOT NULL'
-    add_index :products, :status
-    add_index :products, :kind
-    add_index :products, :metadata, using: :gin
+    add_index :products, :sku, unique: true, where: 'sku IS NOT NULL', if_not_exists: true
+    add_index :products, :status, if_not_exists: true
+    add_index :products, :kind, if_not_exists: true
+    add_index :products, :metadata, using: :gin, if_not_exists: true
 
-    add_check_constraint :products, "kind IN ('physical', 'digital')", name: 'products_kind_check'
-    add_check_constraint :products, "status IN ('active', 'inactive', 'draft')", name: 'products_status_check'
-    add_check_constraint :products, 'default_price >= 0', name: 'products_default_price_non_negative'
-    add_check_constraint :products, '(stock_quantity IS NULL) OR (stock_quantity >= 0)', name: 'products_stock_quantity_non_negative'
+    add_check_constraint :products, "kind IN ('physical', 'digital')", name: 'products_kind_check', if_not_exists: true
+    add_check_constraint :products, "status IN ('active', 'inactive', 'draft')", name: 'products_status_check', if_not_exists: true
+    add_check_constraint :products, 'default_price >= 0', name: 'products_default_price_non_negative', if_not_exists: true
+    add_check_constraint :products, '(stock_quantity IS NULL) OR (stock_quantity >= 0)', name: 'products_stock_quantity_non_negative', if_not_exists: true
   end
 end

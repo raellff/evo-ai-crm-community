@@ -17,6 +17,27 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     end
   end
 
+  # Propagates an agent's message deletion to WhatsApp (delete-for-everyone).
+  # Returns true when the provider acknowledged the revoke.
+  def delete_message(message)
+    return false if api_base_path.blank? || instance_name.blank?
+    return false if message.source_id.blank?
+
+    remote_jid = remote_jid_for(message)
+    return false if remote_jid.blank?
+
+    response = HTTParty.delete(
+      "#{api_base_path}/chat/deleteMessageForEveryone/#{instance_name}",
+      headers: api_headers,
+      body: { id: message.source_id, remoteJid: remote_jid, fromMe: message.outgoing? }.to_json,
+      timeout: 10
+    )
+    return true if response.success?
+
+    Rails.logger.warn("Evolution API: deleteMessageForEveryone failed (#{response.code}) for source_id=#{message.source_id}")
+    false
+  end
+
   def send_template(phone_number, template_info)
     # Evolution API doesn't support template messages in the same way
     # For now, we'll send a regular text message
@@ -297,6 +318,14 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     whatsapp_channel.provider_config['instance_name']
   end
 
+  def remote_jid_for(message)
+    source_id = message.conversation&.contact_inbox&.source_id.to_s
+    return nil if source_id.blank?
+    return source_id if source_id.include?('@')
+
+    "#{source_id.delete('+')}@s.whatsapp.net"
+  end
+
   def send_interactive_message(phone_number, message)
     clean_number = phone_number.delete('+')
     items = filter_valid_items(message.content_attributes&.dig('items') || [])
@@ -424,17 +453,16 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   def send_media_message(phone_number, message, endpoint)
     attachment = message.attachments.first
 
-    # Use direct S3 URL for media
-    media_url = generate_direct_s3_url(attachment)
+    media_url = generate_media_url(attachment)
 
-    Rails.logger.info "[Evolution Media] Sending #{attachment.file_type} with direct URL: #{media_url}"
+    Rails.logger.info "[Evolution Media] Sending #{attachment.file_type} with URL: #{media_url}"
 
     response = HTTParty.post(
       "#{api_base_path}/message/#{endpoint}/#{instance_name}",
       headers: api_headers,
       body: {
         number: phone_number.delete('+'),
-        mediatype: attachment.file_type,
+        mediatype: map_file_type_to_evolution_media_type(attachment.file_type),
         media: media_url,
         caption: html_to_whatsapp(message.content.to_s),
         fileName: attachment.file.filename.to_s
@@ -442,6 +470,19 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     )
 
     process_response(response)
+  end
+
+  # Evolution API/Baileys only accepts document/image/video/audio as mediatype.
+  # The 'file' enum value (PDF/Word/etc.) must be sent as 'document', mirroring
+  # EvolutionGoService#map_file_type_to_evolution_go and NotificameService.
+  def map_file_type_to_evolution_media_type(file_type)
+    case file_type
+    when 'image' then 'image'
+    when 'audio' then 'audio'
+    when 'video' then 'video'
+    when 'file' then 'document'
+    else 'document'
+    end
   end
 
   def send_audio_message(phone_number, message)
@@ -460,11 +501,9 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   end
 
   def send_audio_with_direct_url(phone_number, attachment)
-    # Generate direct public URL for S3 bucket
-    audio_url = generate_direct_s3_url(attachment)
+    audio_url = generate_media_url(attachment)
 
-    # Debug log
-    Rails.logger.info "[Evolution Audio] Trying direct URL: #{audio_url}"
+    Rails.logger.info "[Evolution Audio] Trying URL: #{audio_url}"
 
     body_data = {
       number: phone_number.delete('+'),
@@ -486,31 +525,17 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     process_response(response)
   end
 
-  def generate_direct_s3_url(attachment)
+  def generate_media_url(attachment)
     return attachment.file_url unless attachment.file.attached?
 
-    # Always use a signed URL — never the bare object URL.
-    # Private buckets (Cloudflare R2, S3 restricted ACLs, MinIO) return an XML
-    # error to unauthenticated GETs; Evolution API then rejects with a MIME-type
-    # error. TTL is 15 minutes (instead of the Rails default of 5 minutes) so
-    # slow providers have enough time to fetch large video/PDF files.
-    #
-    # ACTIVE_STORAGE_URL overrides the host used in DiskService signed URLs so
-    # that external containers (Evolution API, Evolution Go) can actually reach
-    # the file. Without it, localhost:3000 resolves to the caller's container,
-    # not the CRM Rails app.
-    url_options = Rails.application.routes.default_url_options.dup
-    if ENV['ACTIVE_STORAGE_URL'].present?
-      storage_uri = URI.parse(ENV['ACTIVE_STORAGE_URL'])
-      url_options[:host] = storage_uri.host
-      url_options[:port] = storage_uri.port
-      url_options[:protocol] = storage_uri.scheme
-    end
-    ActiveStorage::Current.url_options = url_options if ActiveStorage::Current.url_options.blank?
-    signed_url = attachment.file.blob.url(expires_in: 15.minutes)
+    # App-proxied by default (EVO-2006): a presigned S3/MinIO URL carries the
+    # STORAGE_ENDPOINT host inside the SigV4 signature, so an internal endpoint
+    # is unreachable by the Evolution API container and cannot be rewritten.
+    # See BlobUrlOptions.outbound_media_url for the delivery-mode/TTL rules.
+    media_url = BlobUrlOptions.outbound_media_url(attachment.file.blob)
 
-    Rails.logger.info "[Evolution S3] Using signed URL with 15-minute TTL (host: #{url_options[:host]})"
-    signed_url
+    Rails.logger.info "[Evolution Media] Outbound media URL with 15-minute TTL (host: #{BlobUrlOptions.effective_url_options[:host]})"
+    media_url
   end
 
   def send_audio_with_base64(phone_number, attachment)

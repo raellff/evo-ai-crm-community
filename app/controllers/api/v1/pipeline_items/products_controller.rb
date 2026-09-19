@@ -6,7 +6,16 @@ class Api::V1::PipelineItems::ProductsController < Api::V1::BaseController
     destroy: 'pipelines.update'
   })
 
+  # Product-catalog writes are MANAGER-level (pipelines.update via require_permissions
+  # above) — unlike pipeline CARD writes, which CRM-178 moved to the agent's
+  # pipeline_items.update. Editing a pipeline's product catalog is not attendance.
+  WRITE_ACTIONS = %w[create update destroy].freeze
+
   before_action :fetch_pipeline_item
+  # EVO-2204: the bare find ignored :pipeline_id, so the products and deal value of an
+  # item in another user's private pipeline were readable and editable through any URL.
+  # Authorizing the item's own pipeline closes the URL/item mismatch too.
+  before_action :authorize_pipeline!
   before_action :fetch_link, only: %i[update destroy]
 
   def index
@@ -65,18 +74,26 @@ class Api::V1::PipelineItems::ProductsController < Api::V1::BaseController
     @pipeline_item = PipelineItem.find(params[:pipeline_item_id])
   rescue ActiveRecord::RecordNotFound
     error_response(
-      code: ApiErrorCodes::RESOURCE_NOT_FOUND,
-      message: "Pipeline item with id #{params[:pipeline_item_id]} not found",
+      ApiErrorCodes::RESOURCE_NOT_FOUND,
+      "Pipeline item with id #{params[:pipeline_item_id]} not found",
       status: :not_found
     )
+  end
+
+  # Automations and the ADK tool call this with a service token and no Current.user —
+  # apply_actor already reads that shape from the body, so the bypass is required.
+  def authorize_pipeline!
+    return if service_authenticated? || @pipeline_item.nil?
+
+    authorize @pipeline_item.pipeline, WRITE_ACTIONS.include?(action_name) ? :update? : :view?
   end
 
   def fetch_link
     @link = @pipeline_item.pipeline_item_products.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     error_response(
-      code: ApiErrorCodes::RESOURCE_NOT_FOUND,
-      message: "Pipeline item product link with id #{params[:id]} not found",
+      ApiErrorCodes::RESOURCE_NOT_FOUND,
+      "Pipeline item product link with id #{params[:id]} not found",
       status: :not_found
     )
   end
@@ -111,8 +128,8 @@ class Api::V1::PipelineItems::ProductsController < Api::V1::BaseController
 
   def validation_error_response(record)
     error_response(
-      code: ApiErrorCodes::VALIDATION_ERROR,
-      message: 'Validation failed',
+      ApiErrorCodes::VALIDATION_ERROR,
+      'Validation failed',
       details: record.errors.full_messages,
       status: :unprocessable_entity
     )

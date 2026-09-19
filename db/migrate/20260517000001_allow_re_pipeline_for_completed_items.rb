@@ -9,12 +9,12 @@ class AllowRePipelineForCompletedItems < ActiveRecord::Migration[7.0]
     add_index :pipeline_items, [:conversation_id, :pipeline_id],
               unique: true,
               where: 'conversation_id IS NOT NULL AND completed_at IS NULL',
-              name: :idx_pipeline_items_active_conversation_per_pipeline
+              name: :idx_pipeline_items_active_conversation_per_pipeline, if_not_exists: true
 
     add_index :pipeline_items, [:contact_id, :pipeline_id],
               unique: true,
               where: 'conversation_id IS NULL AND completed_at IS NULL',
-              name: :idx_pipeline_items_active_contact_per_pipeline
+              name: :idx_pipeline_items_active_contact_per_pipeline, if_not_exists: true
   end
 
   def down
@@ -24,11 +24,11 @@ class AllowRePipelineForCompletedItems < ActiveRecord::Migration[7.0]
     add_index :pipeline_items, [:conversation_id, :pipeline_id],
               unique: true,
               where: 'conversation_id IS NOT NULL',
-              name: :index_pipeline_items_on_conversation_id_and_pipeline_id
+              name: :index_pipeline_items_on_conversation_id_and_pipeline_id, if_not_exists: true
 
     add_index :pipeline_items, [:contact_id, :pipeline_id],
               unique: true,
               where: 'conversation_id IS NULL',
-              name: :index_pipeline_items_on_contact_id_and_pipeline_id
+              name: :index_pipeline_items_on_contact_id_and_pipeline_id, if_not_exists: true
   end
 end

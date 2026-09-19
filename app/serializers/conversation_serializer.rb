@@ -54,19 +54,24 @@ module ConversationSerializer
     if unread_counts
       result['unread_count'] = unread_counts[conversation.id] || 0
     else
-      result['unread_count'] = conversation.unread_incoming_messages&.count || 0
+      result['unread_count'] = conversation.unread_incoming_messages_count
     end
     result['custom_attributes'] = conversation.custom_attributes || {}
+    # Sinaliza conversa de grupo (contact.type == 'group') para o front filtrar e
+    # reconciliar a aba "Grupos" no realtime sem outra request.
+    result['is_group'] = conversation.contact&.group? || false
 
     # Include contact
     if include_contact && conversation.contact.present?
+      pii_masked = ContactPiiMasker.should_mask?
+      contact = conversation.contact
       result['contact'] = {
-        id: conversation.contact.id,
-        name: conversation.contact.name,
-        email: conversation.contact.email,
-        phone_number: conversation.contact.phone_number,
-        thumbnail: conversation.contact.avatar_url,
-        custom_attributes: conversation.contact.custom_attributes || {}
+        id: contact.id,
+        name: pii_masked ? ContactPiiMasker.mask_phone_like_name(contact.name) : contact.name,
+        email: pii_masked ? ContactPiiMasker.mask_email(contact.email) : contact.email,
+        phone_number: pii_masked ? ContactPiiMasker.mask_phone(contact.phone_number) : contact.phone_number,
+        thumbnail: contact.avatar_url,
+        custom_attributes: contact.custom_attributes || {}
       }
     end
 
@@ -75,7 +80,8 @@ module ConversationSerializer
       inbox_data = {
         id: conversation.inbox.id,
         name: conversation.inbox.name,
-        channel_type: conversation.inbox.channel_type
+        channel_type: conversation.inbox.channel_type,
+        agent_bot_active: conversation.inbox.active_bot? == true
       }
 
       # Provider pode não existir em todos os tipos de channel (ex: Channel::Telegram)
@@ -103,14 +109,12 @@ module ConversationSerializer
     if include_labels
       # Historical cached_label_list entries may be either human-readable titles
       # (post label_concern UUID→title normalization) or raw UUIDs (pre-fix data).
-      # Resolve both so conversation cards keep rendering for legacy rows.
-      title_index = labels_by_title || {}
-      id_index = labels_by_id || {}
-      result['labels'] = conversation.cached_label_list_array.filter_map do |tag|
-        tag_str = tag.to_s
-        label_record = title_index[tag_str.downcase] || id_index[tag_str]
-        label_record ? LabelSerializer.serialize(label_record) : nil
-      end
+      # Labels::TagChipResolver resolves both, matching the realtime path.
+      result['labels'] = Labels::TagChipResolver.chips_for(
+        conversation.cached_label_list_array,
+        by_title: labels_by_title || {},
+        by_id: labels_by_id || {}
+      )
     else
       # If include_labels is false, ensure labels key exists as empty array
       result['labels'] = []
@@ -126,6 +130,11 @@ module ConversationSerializer
       conversation.pipeline_items.each do |item|
         pipeline = item.pipeline
         stage = item.pipeline_stage
+
+        # Skip orphaned pipeline_items whose pipeline or stage was deleted
+        # (belongs_to is required on create but the parent can still be
+        # destroyed, leaving the item dangling — guard against nil here).
+        next if pipeline.nil? || stage.nil?
 
         # Initialize pipeline if not already added
         unless pipelines_hash[pipeline.id]
@@ -200,11 +209,16 @@ module ConversationSerializer
         message_type: last_non_activity_message.message_type,
         created_at: last_non_activity_message.created_at&.iso8601,
         processed_message_content: last_non_activity_message.processed_message_content,
-        content_attributes: last_non_activity_message.content_attributes,
+        # EVO-1551 round 6 — single masker entrypoint per egress audience.
+        content_attributes: last_non_activity_message.content_attributes_for_egress(audience: :per_request),
         attachments: last_non_activity_message.attachments.map { |a| { file_type: a.file_type } },
         sender: last_non_activity_message.sender ? {
           id: last_non_activity_message.sender.id,
-          name: last_non_activity_message.sender.name,
+          name: if ContactPiiMasker.should_mask? && last_non_activity_message.sender_type.to_s.casecmp('contact').zero?
+                  ContactPiiMasker.mask_phone_like_name(last_non_activity_message.sender.name)
+                else
+                  last_non_activity_message.sender.name
+                end,
           type: last_non_activity_message.sender_type
         } : nil
       }

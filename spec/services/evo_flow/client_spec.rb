@@ -8,6 +8,67 @@ RSpec.describe EvoFlow::Client do
   let(:track_url) { "#{api_url}/events/track" }
   let(:payload) { { event: 'contact.created', contactId: '42' } }
 
+  describe 'DEFAULT_API_URL' do
+    # evo-flow listens on 3334 (its own .env.example, and every compose in the
+    # family sets PORT=3334). Defaulting to 3000 here pointed the client at a port
+    # nothing listens on, so a deployment that omitted EVO_FLOW_API_URL got a
+    # silent timeout instead of working.
+    it 'targets evo-flow on port 3334 when EVO_FLOW_API_URL is unset' do
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch)
+        .with('EVO_FLOW_API_URL', described_class::DEFAULT_API_URL)
+        .and_return(described_class::DEFAULT_API_URL)
+
+      stub = stub_request(:get, 'http://evo-flow:3334/api/v1/segments')
+             .to_return(status: 200, body: '{}', headers: { 'Content-Type' => 'application/json' })
+
+      described_class.new(api_key: api_key).get('/segments')
+
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe 'extra_headers (multi-tenant passthrough)' do
+    it 'merges the passthrough onto the base headers, dropping nils' do
+      stub = stub_request(:get, "#{api_url}/journeys")
+             .with(headers: { 'X-Integration-API-Key' => api_key,
+                              'X-Evo-Tenant-Id' => '2c013165-3992-4e6f-ba0d-4b6cb768a5d6',
+                              'Authorization' => 'Bearer user-jwt' })
+             .to_return(status: 200, body: '{}', headers: { 'Content-Type' => 'application/json' })
+
+      described_class.new(api_url: api_url, api_key: api_key,
+                          extra_headers: { 'X-Evo-Tenant-Id' => '2c013165-3992-4e6f-ba0d-4b6cb768a5d6',
+                                           'Authorization' => 'Bearer user-jwt',
+                                           'X-Dropped' => nil })
+                     .request(:get, '/journeys')
+
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe '#patch' do
+    it 'PATCHes to the full /api/v1 URL with auth + json headers (EVO-2188)' do
+      stub = stub_request(:patch, "#{api_url}/journeys/j1")
+             .with(
+               body: { name: 'y' }.to_json,
+               headers: {
+                 'X-Integration-API-Key' => api_key,
+                 'Content-Type' => 'application/json'
+               }
+             )
+             .to_return(
+               status: 200,
+               body: { id: 'j1', name: 'y' }.to_json,
+               headers: { 'Content-Type' => 'application/json' }
+             )
+
+      result = client.patch('/journeys/j1', { name: 'y' })
+
+      expect(stub).to have_been_requested
+      expect(result).to include('id' => 'j1', 'name' => 'y')
+    end
+  end
+
   describe '#post' do
     it 'POSTs to the full /api/v1 URL with auth + json headers (AC1)' do
       stub = stub_request(:post, track_url)
@@ -202,6 +263,58 @@ RSpec.describe EvoFlow::Client do
       stub_request(:post, batch_url).to_raise(Errno::ECONNREFUSED)
 
       expect { client.post_batch(events) }
+        .to raise_error(EvoFlow::HTTPError) { |error| expect(error.code).to be_nil }
+    end
+  end
+
+  describe '#delete' do
+    let(:segment_path) { '/segments/seg-1' }
+    let(:segment_url) { "#{api_url}/segments/seg-1" }
+
+    it 'DELETEs the full /api/v1 URL with auth header and returns the parsed body' do
+      stub = stub_request(:delete, segment_url)
+             .with(headers: { 'X-Integration-API-Key' => api_key })
+             .to_return(
+               status: 200,
+               body: { id: 'seg-1', deleted: true }.to_json,
+               headers: { 'Content-Type' => 'application/json' }
+             )
+
+      result = client.delete(segment_path)
+
+      expect(stub).to have_been_requested
+      expect(result).to include('id' => 'seg-1', 'deleted' => true)
+    end
+
+    it 'returns nil on an empty 204 (no body to parse)' do
+      stub_request(:delete, segment_url).to_return(status: 204, body: '')
+
+      expect(client.delete(segment_path)).to be_nil
+    end
+
+    it 'keeps the /api/v1 prefix and never hits the bare root' do
+      good = stub_request(:delete, segment_url).to_return(status: 200, body: '{}')
+      root = stub_request(:delete, 'http://evo-flow:3000/segments/seg-1')
+
+      client.delete(segment_path)
+      client.delete('segments/seg-1') # no leading slash
+
+      expect(good).to have_been_requested.times(2)
+      expect(root).not_to have_been_requested
+    end
+
+    it 'raises EvoFlow::HTTPError with code 404 on upstream 4xx' do
+      stub_request(:delete, segment_url).to_return(status: 404, body: { error: 'nope' }.to_json,
+                                                   headers: { 'Content-Type' => 'application/json' })
+
+      expect { client.delete(segment_path) }
+        .to raise_error(EvoFlow::HTTPError) { |error| expect(error.code).to eq(404) }
+    end
+
+    it 'raises EvoFlow::HTTPError with nil code on a network timeout' do
+      stub_request(:delete, segment_url).to_timeout
+
+      expect { client.delete(segment_path) }
         .to raise_error(EvoFlow::HTTPError) { |error| expect(error.code).to be_nil }
     end
   end

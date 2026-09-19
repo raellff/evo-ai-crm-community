@@ -1,4 +1,8 @@
 class Api::V1::Integrations::OpenaiController < Api::V1::BaseController
+  require_permissions({
+    process_event: 'integrations.execute'
+  })
+
   def process_event
     # Use global configuration instead of hook settings
     processor = Integrations::Openai::GlobalProcessorService.new(

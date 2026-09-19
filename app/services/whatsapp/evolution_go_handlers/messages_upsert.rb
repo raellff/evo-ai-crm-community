@@ -8,6 +8,11 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   private
 
   def handle_message
+    if protocol_message?
+      handle_revoke_protocol
+      return
+    end
+
     return unless message_processable?
 
     Rails.logger.info "Evolution Go API: Creating new message #{raw_message_id}"
@@ -18,6 +23,19 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     set_conversation
     update_conversation_status_if_needed
     create_message(attach_media: media_attachment?)
+  end
+
+  def protocol_message?
+    @evolution_go_message.is_a?(Hash) && @evolution_go_message[:protocolMessage].present?
+  end
+
+  # A revoke arrives as a protocolMessage; never create a message for it (that
+  # produced an empty bubble) and mark the original as revoked-by-contact.
+  def handle_revoke_protocol
+    protocol = @evolution_go_message[:protocolMessage]
+    source_id = revoked_message_source_id(protocol)
+    Rails.logger.info "Evolution Go API: Protocol message (type: #{protocol[:type].inspect}, revoked id: #{source_id.inspect}) — not creating a message; marking original revoked"
+    mark_message_revoked_by_source_id(source_id)
   end
 
   def set_contact
@@ -251,7 +269,9 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     @message = conversation.messages.build(message_attributes)
 
     Rails.logger.info "Evolution Go API: Message built with attributes: #{message_attributes.keys}"
-    Rails.logger.info "Evolution Go API: Message content_attributes: #{@message.content_attributes}"
+    # EVO-1551 round 6 — keys only; full hash may carry widget pre-chat PII
+    # (submitted_email/submitted_values) and leak via log aggregators.
+    Rails.logger.info "Evolution Go API: Message content_attributes keys: #{@message.content_attributes&.keys}"
   end
 
   def handle_attach_media

@@ -182,7 +182,7 @@ contacts:
       - "equal_to"
       - "not_equal_to"
   country_code:
-    attribute_type: "additional_attributes"
+    attribute_type: "standard"
     data_type: "text_case_insensitive"
     filter_operators:
       - "equal_to"
@@ -195,17 +195,17 @@ contacts:
       - "not_equal_to"
       - "contains"
       - "does_not_contain"
-  company:
-    attribute_type: "additional_attributes"
-    data_type: "text_case_insensitive"
-    filter_operators:
-      - "equal_to"
-      - "not_equal_to"
-      - "contains"
-      - "does_not_contain"
   labels:
     attribute_type: "standard"
     data_type: "labels"
+    filter_operators:
+      - "equal_to"
+      - "not_equal_to"
+      - "is_present"
+      - "is_not_present"
+  company:
+    attribute_type: "standard"
+    data_type: "company"
     filter_operators:
       - "equal_to"
       - "not_equal_to"

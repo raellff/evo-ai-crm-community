@@ -31,7 +31,6 @@ module Redis::RedisKeys
   REAUTHORIZATION_REQUIRED =  'REAUTHORIZATION_REQUIRED:%<obj_type>s:%<obj_id>s'.freeze
 
   ## Internal Installation related keys
-  EVOLUTION_INSTALLATION_ONBOARDING = 'EVOLUTION_INSTALLATION_ONBOARDING'.freeze
   EVOLUTION_INSTALLATION_CONFIG_RESET_WARNING = 'EVOLUTION_CONFIG_RESET_WARNING'.freeze
   LATEST_EVOLUTION_VERSION = 'LATEST_EVOLUTION_VERSION'.freeze
   # Check if a message create with same source-id is in progress?

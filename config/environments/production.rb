@@ -32,13 +32,26 @@ Rails.application.configure do
   # config.action_dispatch.x_sendfile_header = 'X-Sendfile' # for Apache
   # config.action_dispatch.x_sendfile_header = 'X-Accel-Redirect' # for NGINX
 
-  # Store uploaded files on the local file system (see config/storage.yml for options)
-  config.active_storage.service = begin
-    GlobalConfigService.load('ACTIVE_STORAGE_SERVICE', ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local'))
-  rescue StandardError => e
-    warn "[ActiveStorage] GlobalConfigService unavailable at boot (#{e.message}); falling back to ENV"
-    ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local')
-  end.to_sym
+  # Storage service (see config/storage.yml). Resolve ONLY from the ENV — same as
+  # staging.rb/development.rb — never from GlobalConfigService/DB.
+  # EVO-2095: reading GlobalConfigService here gave the DB value precedence over
+  # the ENV (default seed is `local`), and it queried the DB DURING boot config,
+  # firing the active_storage_blob load hook before the service was assigned. The
+  # result was non-deterministic across processes (puma -> S3, sidekiq -> Disk):
+  # attachments landed on the container's ephemeral disk and were lost on redeploy.
+  # Storage is boot infrastructure — it must be ENV-driven and deterministic.
+  config.active_storage.service = ENV.fetch('ACTIVE_STORAGE_SERVICE', 'local').to_sym
+
+  # Attachments are served by the app (ActiveStorage proxy) so the internal
+  # S3/MinIO endpoint never reaches the browser — presigned URLs embed the host
+  # in the SigV4 signature and cannot be rewritten (EVO-2006).
+  # ATTACHMENT_DELIVERY=redirect rolls back to storage redirects (requires a
+  # storage host reachable by browsers and sibling containers).
+  # Security note: proxy blob URLs carry a permanent signed id (anyone with the
+  # link can fetch the file, same as a leaked presigned URL but without expiry);
+  # outbound URLs handed to providers keep a 15-minute TTL (BlobUrlOptions).
+  config.active_storage.resolve_model_to_route =
+    ENV.fetch('ATTACHMENT_DELIVERY', 'proxy').casecmp('redirect').zero? ? :rails_storage_redirect : :rails_storage_proxy
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
   config.force_ssl = ActiveModel::Type::Boolean.new.cast(ENV.fetch('FORCE_SSL', false))
@@ -92,13 +105,12 @@ Rails.application.configure do
   # Set this to true and configure the email server for immediate delivery to raise delivery errors.
   # config.action_mailer.raise_delivery_errors = false
 
-  # Set this to appropriate ingress service for which the options are :
-  # :relay for Exim, Postfix, Qmail
-  # :mailgun for Mailgun
-  # :mandrill for Mandrill
-  # :postmark for Postmark
-  # :sendgrid for Sendgrid
-  config.action_mailbox.ingress = (GlobalConfigService.load('RAILS_INBOUND_EMAIL_SERVICE', ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay')) rescue ENV.fetch('RAILS_INBOUND_EMAIL_SERVICE', 'relay')).to_sym
+  # Inbound email ingress (:relay | :mailgun | :mandrill | :postmark | :sendgrid) is
+  # configured once, ENV-first, in config/initializers/mailer.rb — the single source
+  # of truth. Initializers load AFTER this environment file, so any assignment here
+  # would be overwritten by mailer.rb anyway. EVO-2096: it must never be resolved from
+  # GlobalConfigService/DB at boot (DB value would take precedence over the ENV and
+  # fire a DB query during boot config, non-deterministic across processes).
 
   # BACKEND_URL must be a publicly reachable URL in production. A missing, malformed, or
   # localhost value silently breaks webhook callbacks and Active Storage URLs sent to

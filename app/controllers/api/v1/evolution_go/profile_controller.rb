@@ -1,6 +1,17 @@
 class Api::V1::EvolutionGo::ProfileController < Api::V1::BaseController
   include EvolutionGoConcern
 
+  require_permissions({
+    show: 'inboxes.read',
+    info: 'inboxes.read',
+    avatar: 'inboxes.read',
+    update_picture: 'inboxes.update',
+    update_name: 'inboxes.update',
+    update_status: 'inboxes.update',
+    update_picture_by_instance: 'inboxes.update',
+    remove_picture: 'inboxes.update'
+  })
+
   before_action :set_instance_params, only: [:show, :info, :avatar, :update_picture, :update_name, :update_status,
                                              :update_picture_by_instance, :remove_picture]
 

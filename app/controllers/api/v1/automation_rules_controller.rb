@@ -22,8 +22,8 @@ class Api::V1::AutomationRulesController < Api::V1::BaseController
     @automation_rule = AutomationRule.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     error_response(
-      code: ApiErrorCodes::AUTOMATION_RULE_NOT_FOUND,
-      message: "Automation rule with id #{params[:id]} not found",
+      ApiErrorCodes::AUTOMATION_RULE_NOT_FOUND,
+      "Automation rule with id #{params[:id]} not found",
       status: :not_found
     )
   end
@@ -52,13 +52,13 @@ class Api::V1::AutomationRulesController < Api::V1::BaseController
   def create
     @automation_rule = AutomationRule.new(automation_rules_permit)
     @automation_rule.actions = params[:actions]
-    @automation_rule.conditions = params[:conditions]
+    @automation_rule.conditions = permitted_conditions
     @automation_rule.flow_data = params[:flow_data] if params[:flow_data]
 
     unless @automation_rule.valid?
       return error_response(
-        code: ApiErrorCodes::VALIDATION_ERROR,
-        message: 'Validation failed',
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Validation failed',
         details: @automation_rule.errors.full_messages,
         status: :unprocessable_entity
       )
@@ -86,8 +86,8 @@ class Api::V1::AutomationRulesController < Api::V1::BaseController
     rescue StandardError => e
       Rails.logger.error e
       error_response(
-        code: ApiErrorCodes::VALIDATION_ERROR,
-        message: 'Update failed',
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Update failed',
         details: @automation_rule.errors.full_messages,
         status: :unprocessable_entity
       )
@@ -149,7 +149,7 @@ class Api::V1::AutomationRulesController < Api::V1::BaseController
   def automation_rule_update
     @automation_rule.update!(automation_rules_permit)
     @automation_rule.actions = params[:actions] if params[:actions]
-    @automation_rule.conditions = params[:conditions] if params[:conditions]
+    @automation_rule.conditions = permitted_conditions if params[:conditions]
     @automation_rule.flow_data = params[:flow_data] if params[:flow_data]
     @automation_rule.save!
   end
@@ -181,10 +181,39 @@ class Api::V1::AutomationRulesController < Api::V1::BaseController
     (current_page - 1) * per_page
   end
 
+  # `values` is an array of scalars for regular operators but an object
+  # `{to: [], from: []}` for `attribute_changed` (the shape
+  # ConditionsFilterService reads), and `permit` cannot declare "array OR hash"
+  # for one key — so each condition is permitted by hand.
+  def permitted_conditions
+    return [] unless params[:conditions].is_a?(Array)
+
+    params[:conditions].filter_map do |condition|
+      next unless condition.is_a?(ActionController::Parameters)
+
+      permitted = condition.permit(:attribute_key, :filter_operator, :query_operator, :custom_attribute_type)
+      permit_values(condition, permitted)
+      permitted.to_h
+    end
+  end
+
+  # An array whose items are not all scalars is rejected whole by `permit`,
+  # which returns nil — leave `values` out entirely in that case, the way a
+  # valueless condition (`is_present`) is stored.
+  def permit_values(condition, permitted)
+    values = condition[:values]
+
+    if values.is_a?(ActionController::Parameters)
+      permitted[:values] = values.permit(to: [], from: [])
+    elsif values.is_a?(Array)
+      scalars = condition.permit(values: [])[:values]
+      permitted[:values] = scalars unless scalars.nil?
+    end
+  end
+
   def automation_rules_permit
     params.permit(
       :name, :description, :event_name, :active, :mode,
-      conditions: [:attribute_key, :filter_operator, :query_operator, :custom_attribute_type, { values: [] }],
       actions: [:action_name, { action_params: [] }],
       flow_data: {
         nodes: [

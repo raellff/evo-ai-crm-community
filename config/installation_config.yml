@@ -157,8 +157,11 @@
 - name: RAILS_INBOUND_EMAIL_SERVICE
   display_title: 'Inbound Email Service'
   value: 'relay'
-  locked: false
-  description: 'Inbound email ingress provider (relay, mailgun, mandrill, sendgrid)'
+  # locked: the ingress is resolved from the RAILS_INBOUND_EMAIL_SERVICE env var
+  # (config/initializers/mailer.rb), NOT from this DB value, which is now only
+  # informational. Read-only in the UI so it doesn't imply an inert control (EVO-2096).
+  locked: true
+  description: 'Inbound email ingress provider (relay, mailgun, mandrill, sendgrid). Set by the RAILS_INBOUND_EMAIL_SERVICE env var; this DB value is informational and does not change the ingress.'
   type: text
 - name: RAILS_INBOUND_EMAIL_PASSWORD_SECRET
   display_title: 'Inbound Email Password'
@@ -194,8 +197,12 @@
 - name: ACTIVE_STORAGE_SERVICE
   display_title: 'Storage Service'
   value: 'local'
-  locked: false
-  description: 'Active storage provider (local, amazon, s3_compatible, google, microsoft)'
+  # locked: in production the storage service is resolved from the
+  # ACTIVE_STORAGE_SERVICE env (production.rb), NOT from this DB value — which is
+  # now informational only. Read-only in the UI so it does not present a control
+  # that no longer affects storage (EVO-2095).
+  locked: true
+  description: 'Storage provider (local, amazon, s3_compatible, google, microsoft). In production this is set by the ACTIVE_STORAGE_SERVICE env; this DB value is informational and does not change storage.'
   type: text
 - name: STORAGE_BUCKET_NAME
   display_title: 'Bucket Name'
@@ -417,6 +424,15 @@
   type: secret
 ## ------ End of Configs added for Evolution Hub ------ ##
 
+## ------ Configs for purchase webhook ingress (lead capture) ------ ##
+- name: PURCHASE_WEBHOOK_SECRET_VIRTU
+  display_title: 'Purchase Webhook Secret (Virtu)'
+  value:
+  locked: false
+  description: 'Shared HMAC-SHA256 secret used to sign purchase webhooks the Virtu checkout posts to /api/v1/webhooks/purchases/virtu. The endpoint refuses every request while this is blank.'
+  type: secret
+## ------ End of purchase webhook configs ------ ##
+
 ## ------ Configs added for Twitter Channel ------ ##
 - name: TWITTER_APP_ID
   display_title: 'Twitter App ID'
@@ -555,6 +571,11 @@
   value:
   locked: false
   description: 'BMS IP Pool'
+- name: BMS_API_URL
+  display_title: 'BMS API URL'
+  value:
+  locked: false
+  description: 'Base URL of the BMS API instance, used as configured (include the /api prefix if your instance serves the API behind it); empty uses the legacy host'
 ## ------ End of Configs added for BMS ------ ##
 
 ## ------ Configs added for Linear ------ ##

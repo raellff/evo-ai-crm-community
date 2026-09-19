@@ -19,9 +19,7 @@ class ConversationFinder
 
   def initialize(current_user, params)
     @current_user = current_user
-    # Avoid remote role lookup (evo-auth get_role) on conversations index hot path.
     @is_admin = current_user&.administrator? || false
-    @has_conversations_read = false
     @params = params || {}
   end
 
@@ -104,6 +102,12 @@ class ConversationFinder
     # Apply assignee type filter
     query = apply_assignee_type_filter(query)
 
+    # Apply chip filters (unread / unanswered / groups / archived) — list-only
+    query = apply_unread_filter(query)
+    query = apply_unanswered_filter(query)
+    query = apply_is_group_filter(query)
+    query = apply_archived_filter(query)
+
     # Apply search filter if needed
     query = apply_query_filter(query) if @params[:q].present?
 
@@ -115,7 +119,7 @@ class ConversationFinder
     # chip only appears later if some other action triggers a refetch with the
     # association eager-loaded.
     query = query.preload(
-      :inbox,
+      { inbox: :agent_bot_inbox },
       :contact,
       :assignee,
       :team,
@@ -133,21 +137,18 @@ class ConversationFinder
   def apply_inbox_filter(query)
     return query unless @params[:inbox_id]
 
-    inbox_ids = if @params[:inbox_id]
-                  @current_user.assigned_inboxes.where(id: @params[:inbox_id]).pluck(:id)
-                else
-                  @current_user.assigned_inboxes.pluck(:id)
-                end
+    # Narrowing `assigned_inboxes` drops an inbox the user may not access.
+    inbox_ids = @current_user.assigned_inboxes.where(id: @params[:inbox_id]).pluck(:id)
 
     query.where(inbox_id: inbox_ids)
   end
 
   def apply_permission_filter(query)
-    # Allow access if user is admin or has conversations.read permission
-    return query if @is_admin || @has_conversations_read
+    return query if @is_admin
 
-    # Otherwise, filter by assigned inboxes only
-    query.where(inbox: @current_user.inboxes)
+    # `assigned_inboxes` is the role-aware source: admin or `conversations.read_all`
+    # sees every inbox, an assigned member only theirs, no membership none.
+    query.where(inbox: @current_user.assigned_inboxes)
   end
 
   def apply_status_filter(query)
@@ -186,6 +187,46 @@ class ConversationFinder
       query.assigned
     else
       query
+    end
+  end
+
+  # Chip "Não lidas": conversas com mensagens incoming não lidas pelo agente.
+  def apply_unread_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:unread])
+
+    query.unread
+  end
+
+  # Scopes to the current user here rather than via a second `assignee_type=me` row
+  # in the chip preset: a two-row preset routes to POST /filter, which has no
+  # `unanswered` attribute. One row keeps the chip on this GET path.
+  def apply_unanswered_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:unanswered])
+
+    query.assigned_to(@current_user).unanswered
+  end
+
+  # Chip "Grupos": conversas cujo contato é um grupo (contact.type = 'group').
+  # Naturalmente vazio em canais sem grupos (cloud/Telegram). O contato já está
+  # joined em build_base_filter_query.
+  def apply_is_group_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:is_group])
+
+    query.where(contacts: { type: 'group' })
+  end
+
+  # Aba "Arquivadas": archived vive em custom_attributes.archived (jsonb boolean).
+  # archived=true  -> só arquivadas; archived=false -> exclui arquivadas.
+  # Param ausente = sem filtro (lista padrão inalterada; o front esconde as
+  # arquivadas client-side na visão normal). `->>'archived'` extrai o boolean JSON
+  # como texto ('true'); IS DISTINCT FROM cobre null/false/ausente.
+  def apply_archived_filter(query)
+    return query if @params[:archived].blank?
+
+    if ActiveModel::Type::Boolean.new.cast(@params[:archived])
+      query.where("conversations.custom_attributes->>'archived' = 'true'")
+    else
+      query.where("conversations.custom_attributes->>'archived' IS DISTINCT FROM 'true'")
     end
   end
 

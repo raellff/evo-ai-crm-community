@@ -57,6 +57,12 @@ pt_BR:
         failed: Arquivo vazio
       export:
         success: Avisaremos você assim que a exportação de arquivos estiver pronta para ser exibida.
+    conversations:
+      import:
+        missing_file: Arquivo é obrigatório
+        too_large: 'CSV excede o limite máximo de linhas (%{limit})'
+        too_large_bytes: 'Arquivo excede o tamanho máximo permitido (%{limit} bytes)'
+        invalid_csv: 'CSV malformado: %{error}'
       email:
         invalid: E-mail inválido
       phone_number:
@@ -177,6 +183,8 @@ pt_BR:
         removed: '%{user_name} removeu %{labels}'
       muted: '%{user_name} silenciou a conversa'
       unmuted: '%{user_name} reativou a conversa'
+      bot_handoff: 'O bot encaminhou a conversa para um atendente'
+      human_handoff: 'O atendente devolveu a conversa ao bot'
       auto_resolution_message: 'Resolvendo a conversa dado que está inativa por um tempo. Por favor, inicie uma nova conversa se precisar de mais ajuda.'
     templates:
       greeting_message_body: '%{account_name} normalmente responde em algumas horas.'

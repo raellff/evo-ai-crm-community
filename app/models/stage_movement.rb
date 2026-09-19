@@ -28,7 +28,7 @@ class StageMovement < ApplicationRecord
   belongs_to :to_stage, class_name: 'PipelineStage'
   belongs_to :moved_by, class_name: 'User', optional: true
 
-  enum movement_type: {
+  enum :movement_type, {
     manual: 0,         # Movido manualmente por um usuário
     automated: 1,      # Movido por automação/regra
     system: 2,         # Movido pelo sistema (entrada no funil, etc)
