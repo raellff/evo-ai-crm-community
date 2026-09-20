@@ -657,17 +657,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
     t.timestamptz "updated_at"
   end
 
-  create_table "evo_core_agent_integrations", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
-    t.uuid "agent_id", null: false
-    t.string "provider", limit: 100, null: false
-    t.jsonb "config", default: {}
-    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
-    t.datetime "updated_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
-    t.index ["agent_id"], name: "idx_evo_core_agent_integrations_agent"
-    t.index ["provider"], name: "idx_evo_core_agent_integrations_provider"
-    t.unique_constraint ["agent_id", "provider"], name: "unique_agent_integration"
-  end
-
   create_table "evo_core_agents", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
     t.string "name", limit: 255, null: false
     t.text "description"
@@ -691,56 +680,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
     t.check_constraint "type::text = ANY (ARRAY['llm'::character varying::text, 'sequential'::character varying::text, 'parallel'::character varying::text, 'loop'::character varying::text, 'a2a'::character varying::text, 'workflow'::character varying::text, 'crew_ai'::character varying::text, 'task'::character varying::text, 'external'::character varying::text])", name: "check_agent_type"
   end
 
-  create_table "evo_core_api_keys", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
-    t.string "name", limit: 255, null: false
-    t.string "provider", limit: 255, null: false
-    t.text "key", null: false
-    t.boolean "is_active", default: true
-    t.timestamptz "created_at", default: -> { "now()" }
-    t.timestamptz "updated_at", default: -> { "now()" }
-    t.index ["is_active"], name: "idx_evo_core_api_keys_is_active"
-    t.index ["name"], name: "idx_evo_core_api_keys_name"
-    t.index ["name"], name: "idx_evo_core_api_keys_name_unique", unique: true
-  end
-
   create_table "evo_core_community_schema_migrations", primary_key: "version", id: :bigint, default: nil, force: :cascade do |t|
     t.boolean "dirty", null: false
-  end
-
-  create_table "evo_core_custom_mcp_servers", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
-    t.string "name", limit: 255, null: false
-    t.text "description"
-    t.string "url", limit: 1024, null: false
-    t.json "headers", null: false
-    t.integer "timeout", default: 0, null: false
-    t.integer "retry_count", default: 0, null: false
-    t.string "tags", limit: 255, default: [], null: false, array: true
-    t.json "tools", default: {}, null: false
-    t.timestamptz "created_at", default: -> { "now()" }
-    t.timestamptz "updated_at", default: -> { "now()" }
-    t.index ["name"], name: "idx_evo_core_custom_mcp_servers_name"
-    t.index ["name"], name: "idx_evo_core_custom_mcp_servers_name_unique", unique: true
-  end
-
-  create_table "evo_core_custom_tools", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
-    t.string "name", limit: 255, null: false
-    t.text "description"
-    t.string "method", limit: 10, null: false
-    t.string "endpoint", limit: 1024, null: false
-    t.json "headers", null: false
-    t.json "path_params", null: false
-    t.json "query_params", null: false
-    t.json "body_params", null: false
-    t.json "error_handling", null: false
-    t.json "values", null: false
-    t.string "tags", limit: 255, default: [], null: false, array: true
-    t.string "examples", limit: 255, default: [], null: false, array: true
-    t.string "input_modes", limit: 255, default: [], null: false, array: true
-    t.string "output_modes", limit: 255, default: [], null: false, array: true
-    t.timestamptz "created_at", default: -> { "now()" }
-    t.timestamptz "updated_at", default: -> { "now()" }
-    t.index ["name"], name: "idx_evo_core_custom_tools_name"
-    t.index ["name"], name: "idx_evo_core_custom_tools_name_unique", unique: true
   end
 
   create_table "evo_core_folder_shares", id: :uuid, default: -> { "uuid_generate_v4()" }, force: :cascade do |t|
@@ -1630,8 +1571,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
   add_foreign_key "data_privacy_consents", "users"
   add_foreign_key "evo_agent_processor_execution_metrics", "evo_core_agents", column: "agent_id", name: "evo_agent_processor_execution_metrics_agent_id_fkey", on_delete: :cascade
   add_foreign_key "evo_ai_agent_processor_execution_metrics", "evo_core_agents", column: "agent_id", name: "evo_ai_agent_processor_execution_metrics_agent_id_fkey", on_delete: :cascade
-  add_foreign_key "evo_core_agent_integrations", "evo_core_agents", column: "agent_id", name: "evo_core_agent_integrations_agent_id_fkey", on_delete: :cascade
-  add_foreign_key "evo_core_agents", "evo_core_api_keys", column: "api_key_id", name: "evo_core_agents_api_key_id_fkey", on_delete: :nullify
   add_foreign_key "evo_core_agents", "evo_core_folders", column: "folder_id", name: "evo_core_agents_folder_id_fkey", on_delete: :nullify
   add_foreign_key "evo_core_folder_shares", "evo_core_folders", column: "folder_id", name: "evo_core_folder_shares_folder_id_fkey", on_delete: :cascade
   add_foreign_key "facebook_comment_moderations", "conversations"

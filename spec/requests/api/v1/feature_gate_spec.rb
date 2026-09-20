@@ -40,6 +40,12 @@ RSpec.describe 'Feature gate (require_feature)', type: :request do
         }.to_json,
         headers: { 'Content-Type' => 'application/json' }
       )
+    # EvoAuthConcern resolves conversations.read_all for every non-admin
+    # request (Current.evo_can_read_all_inboxes) — irrelevant to this gate,
+    # but the remote call still happens and must be stubbed or WebMock 500s.
+    stub_request(:post, "#{base_url}/api/v1/users/#{user.id}/check_permission")
+      .to_return(status: 200, body: { success: true, data: { has_permission: false } }.to_json,
+                 headers: { 'Content-Type' => 'application/json' })
   end
 
   describe 'Pipelines' do
@@ -171,6 +177,9 @@ RSpec.describe 'Feature gate (require_feature)', type: :request do
           }.to_json,
           headers: { 'Content-Type' => 'application/json' }
         )
+      stub_request(:post, "#{base_url}/api/v1/users/#{other_user.id}/check_permission")
+        .to_return(status: 200, body: { success: true, data: { has_permission: false } }.to_json,
+                   headers: { 'Content-Type' => 'application/json' })
 
       get '/api/v1/integrations/apps', headers: { 'Authorization' => 'Bearer other-token-2' }, as: :json
       expect(response).to have_http_status(:ok)

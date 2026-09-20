@@ -33,8 +33,15 @@ RSpec.describe 'Pipeline visibility authorization', type: :request do
 
   before do
     spec = self
+    # account-feature-toggles: require_feature :pipelines reads Current.account,
+    # which the stub below never set. A double with id: nil (rather than a real
+    # persisted Account) keeps AccountScoped's default_scope matching this file's
+    # un-scoped (account_id: nil) fixtures instead of requiring every one of them
+    # backfilled.
+    account = instance_double(Account, id: nil, feature_enabled?: true)
     allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
       Current.user = spec.acting_user
+      Current.account = account
       Current.evo_role_key = spec.acting_role
       Current.evo_permission_cache ||= {}
     end

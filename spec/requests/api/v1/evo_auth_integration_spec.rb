@@ -144,6 +144,11 @@ RSpec.describe 'EvoAuth integration through API auth filter', type: :request do
         }.to_json,
         headers: { 'Content-Type' => 'application/json' }
       )
+    # EvoAuthConcern resolves conversations.read_all for every non-admin
+    # request (Current.evo_can_read_all_inboxes); stub it or WebMock 500s.
+    stub_request(:post, "#{base_url}/api/v1/users/#{user.id}/check_permission")
+      .to_return(status: 200, body: { success: true, data: { has_permission: false } }.to_json,
+                 headers: { 'Content-Type' => 'application/json' })
 
     get '/api/v1/profile', headers: headers, as: :json
 
