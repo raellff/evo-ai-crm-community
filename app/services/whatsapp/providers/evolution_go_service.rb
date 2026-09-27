@@ -238,7 +238,7 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
       number: clean_number,
       title: content.truncate(60),
       description: content,
-      footer: 'Evo CRM',
+      footer: 'CrmUX',
       buttons: buttons,
       delay: 0
     }
@@ -273,7 +273,7 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
       title: content.truncate(60),
       description: content,
       buttonText: I18n.t('whatsapp.interactive.list_button', default: 'Menu'),
-      footerText: 'Evo CRM',
+      footerText: 'CrmUX',
       sections: [{ title: I18n.t('whatsapp.interactive.list_section', default: 'Options'), rows: rows }],
       delay: 0
     }
@@ -315,7 +315,7 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
         body: {
           text: (item[:description] || '').to_s.truncate(1024)
         },
-        footer: 'Evo CRM',
+        footer: 'CrmUX',
         buttons: actions.map do |action|
           action = action.with_indifferent_access
           btn_type = (action[:type] || 'reply').to_s.upcase
@@ -335,7 +335,7 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
     body = {
       number: clean_number,
       body: content.presence || '',
-      footer: 'Evo CRM',
+      footer: 'CrmUX',
       cards: cards,
       delay: 0
     }

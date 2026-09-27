@@ -7,11 +7,11 @@ module EvoExtensionPoints
   # (story 0.3); keep both in sync.
   module ThemeTokens
     DEFAULT_TOKENS = {
-      '--evo-color-primary-500' => '#006aff',
+      '--evo-color-primary-500' => '#5b4b94',
       '--evo-color-primary-foreground' => '#ffffff',
-      '--evo-color-accent-500' => '#006aff',
-      '--evo-color-background' => '#0b0f14',
-      '--evo-color-foreground' => '#e6f1ec',
+      '--evo-color-accent-500' => '#c6f135',
+      '--evo-color-background' => '#211c34',
+      '--evo-color-foreground' => '#f7f6f3',
       '--evo-font-sans' => 'Inter, system-ui, sans-serif'
     }.freeze
 

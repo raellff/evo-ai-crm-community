@@ -98,15 +98,15 @@ RSpec.describe EvoExtensionPoints do
     it 'returns the canonical Evolution token set by default' do
       tokens = described_class.defaults
       expect(tokens).to include(
-        '--evo-color-primary-500' => '#006aff',
-        '--evo-color-background' => '#0b0f14'
+        '--evo-color-primary-500' => '#5b4b94',
+        '--evo-color-background' => '#211c34'
       )
     end
 
     it 'returns a fresh copy so callers can mutate without poisoning the default' do
       first = described_class.defaults
       first['--evo-color-primary-500'] = '#000000'
-      expect(described_class.defaults['--evo-color-primary-500']).to eq('#006aff')
+      expect(described_class.defaults['--evo-color-primary-500']).to eq('#5b4b94')
     end
 
     it 'honors a replace override scoped by argument' do
