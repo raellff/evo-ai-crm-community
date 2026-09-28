@@ -12,7 +12,8 @@ class Twitter::DirectMessageParserService < Twitter::WebhooksBaseService
       inbox_id: @inbox.id,
       message_type: outgoing_message? ? :outgoing : :incoming,
       sender: @contact,
-      source_id: direct_message_data['id']
+      source_id: direct_message_data['id'],
+      account_id: @inbox.account_id
     )
     attach_files
   end
@@ -73,6 +74,7 @@ class Twitter::DirectMessageParserService < Twitter::WebhooksBaseService
       inbox_id: @inbox.id,
       contact_id: @contact.id,
       contact_inbox_id: @contact_inbox.id,
+      account_id: @inbox.account_id,
       additional_attributes: {
         type: 'direct_message'
       }

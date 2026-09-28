@@ -77,6 +77,10 @@ class Api::V1::Widget::BaseController < ApplicationController
       inbox_id: inbox.id,
       contact_id: @contact.id,
       contact_inbox_id: @contact_inbox.id,
+      # Public, unauthenticated endpoint (anonymous website visitor) — Current.account
+      # is never set here, so AccountScoped's before_validation fallback stays nil
+      # unless stamped explicitly.
+      account_id: inbox.account_id,
       additional_attributes: {
         browser_language: browser.accept_language&.first&.code,
         browser: browser_params,
@@ -127,6 +131,7 @@ class Api::V1::Widget::BaseController < ApplicationController
       sender: @contact,
       content: message_content,
       inbox_id: conversation.inbox_id,
+      account_id: inbox.account_id,
       content_attributes: {
         in_reply_to: permitted_params[:message][:reply_to]
       },

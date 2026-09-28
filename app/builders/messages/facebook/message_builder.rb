@@ -144,7 +144,8 @@ class Messages::Facebook::MessageBuilder < Messages::Messenger::MessageBuilder
   def conversation_params
     {
       inbox_id: @inbox.id,
-      contact_id: @contact_inbox.contact_id
+      contact_id: @contact_inbox.contact_id,
+      account_id: @inbox.account_id
     }
   end
 
@@ -154,6 +155,7 @@ class Messages::Facebook::MessageBuilder < Messages::Messenger::MessageBuilder
       message_type: @message_type,
       content: response.content,
       source_id: response.identifier,
+      account_id: @inbox.account_id,
       content_attributes: {
         in_reply_to_external_id: response.in_reply_to_external_id
       },

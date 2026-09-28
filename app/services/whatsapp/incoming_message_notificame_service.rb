@@ -146,7 +146,8 @@ class Whatsapp::IncomingMessageNotificameService
           inbox_id: inbox.id,
           message_type: :incoming,
           sender: contact_inbox.contact,
-          source_id: raw_provider_id.presence || msg[:id]
+          source_id: raw_provider_id.presence || msg[:id],
+          account_id: inbox.account_id
         )
         handle_reply_and_ids(incoming, conversation, msg, content_data, raw_provider_id)
         attach_contact(incoming, contact)
@@ -160,7 +161,8 @@ class Whatsapp::IncomingMessageNotificameService
       inbox_id: inbox.id,
       message_type: :incoming,
       sender: contact_inbox.contact,
-      source_id: raw_provider_id.presence || msg[:id]
+      source_id: raw_provider_id.presence || msg[:id],
+      account_id: inbox.account_id
     )
 
     reply_id = msg[:contextProviderMessageId] || msg[:replyProviderMessageId] ||
@@ -281,7 +283,11 @@ class Whatsapp::IncomingMessageNotificameService
     {
       inbox_id: inbox.id,
       contact_id: contact_inbox.contact_id,
-      contact_inbox_id: contact_inbox.id
+      contact_inbox_id: contact_inbox.id,
+      # AccountScoped's before_validation only stamps account_id from
+      # Current.account, nil in this webhook-job context (no request/
+      # session) — without this the conversation was created untenanted.
+      account_id: inbox.account_id
     }
   end
 

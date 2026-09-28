@@ -247,7 +247,8 @@ class Whatsapp::IncomingMessageZapiService
       inbox_id: inbox.id,
       message_type: :incoming,
       sender: contact_inbox.contact,
-      source_id: message_id
+      source_id: message_id,
+      account_id: inbox.account_id
     )
 
     # Store Z-API message IDs

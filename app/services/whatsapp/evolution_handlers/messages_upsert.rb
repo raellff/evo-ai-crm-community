@@ -164,7 +164,11 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
       sender: incoming? ? @contact : User.where(type: 'SuperAdmin').first || User.first,
       sender_type: incoming? ? 'Contact' : 'User',
       message_type: incoming? ? :incoming : :outgoing,
-      content_attributes: message_content_attributes
+      content_attributes: message_content_attributes,
+      # AccountScoped's before_validation only stamps account_id from
+      # Current.account, nil in this webhook-job context (no request/
+      # session) — without this the message was created untenanted.
+      account_id: @inbox.account_id
     )
   end
 
@@ -190,7 +194,11 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
     params = {
       inbox_id: @inbox.id,
       contact_id: @contact.id,
-      contact_inbox_id: @contact_inbox.id
+      contact_inbox_id: @contact_inbox.id,
+      # AccountScoped's before_validation only stamps account_id from
+      # Current.account, nil in this webhook-job context (no request/
+      # session) — without this the conversation was created untenanted.
+      account_id: @inbox.account_id
     }
     params[:additional_attributes] = { evolution_chat_id: group_jid } if jid_type == 'group'
     params

@@ -11,7 +11,8 @@ class Sms::IncomingMessageService
       inbox_id: @inbox.id,
       message_type: :incoming,
       sender: @contact,
-      source_id: params[:id]
+      source_id: params[:id],
+      account_id: @inbox.account_id
     )
     attach_files
     @message.save!
@@ -50,7 +51,8 @@ class Sms::IncomingMessageService
     {
       inbox_id: @inbox.id,
       contact_id: @contact.id,
-      contact_inbox_id: @contact_inbox.id
+      contact_inbox_id: @contact_inbox.id,
+      account_id: @inbox.account_id
     }
   end
 

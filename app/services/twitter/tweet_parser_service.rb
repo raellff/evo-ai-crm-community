@@ -52,6 +52,7 @@ class Twitter::TweetParserService < Twitter::WebhooksBaseService
       inbox_id: @inbox.id,
       contact_id: @contact.id,
       contact_inbox_id: @contact_inbox.id,
+      account_id: @inbox.account_id,
       additional_attributes: {
         type: 'tweet',
         tweet_id: parent_tweet_id,
@@ -85,7 +86,8 @@ class Twitter::TweetParserService < Twitter::WebhooksBaseService
       content: tweet_text,
       inbox_id: @inbox.id,
       message_type: message_type,
-      source_id: tweet_id
+      source_id: tweet_id,
+      account_id: @inbox.account_id
     )
   end
 end

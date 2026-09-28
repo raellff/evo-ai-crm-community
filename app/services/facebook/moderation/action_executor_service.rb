@@ -285,6 +285,7 @@ class Facebook::Moderation::ActionExecutorService
       content: content,
       message_type: :outgoing,
       sender: sender,
+      account_id: conversation.account_id,
       content_attributes: {
         'in_reply_to_external_id' => comment_id,
         'moderation_approved' => true,

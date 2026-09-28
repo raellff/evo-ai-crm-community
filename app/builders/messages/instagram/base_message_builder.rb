@@ -129,7 +129,8 @@ class Messages::Instagram::BaseMessageBuilder < Messages::Messenger::MessageBuil
   def conversation_params
     {
       inbox_id: @inbox.id,
-      contact_id: contact.id
+      contact_id: contact.id,
+      account_id: @inbox.account_id
     }
   end
 
@@ -140,6 +141,7 @@ class Messages::Instagram::BaseMessageBuilder < Messages::Messenger::MessageBuil
       source_id: message_identifier,
       content: message_content,
       sender: @outgoing_echo ? nil : contact,
+      account_id: @inbox.account_id,
       content_attributes: {
         in_reply_to_external_id: message_reply_attributes
       }

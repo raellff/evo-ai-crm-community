@@ -9,6 +9,7 @@ module MailboxHelper
       sender: @conversation.contact,
       content: mail_content&.truncate(150_000),
       inbox_id: @conversation.inbox_id,
+      account_id: @conversation.account_id,
       message_type: 'incoming',
       content_type: 'incoming_email',
       source_id: processed_mail.message_id,

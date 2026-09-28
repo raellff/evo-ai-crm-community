@@ -58,6 +58,7 @@ class Facebook::PostConversationService
         inbox_id: inbox.id,
         contact_id: user_contact_inbox.contact_id,
         contact_inbox_id: user_contact_inbox.id,
+        account_id: inbox.account_id,
         status: :open,
         additional_attributes: {
           conversation_type: 'post',

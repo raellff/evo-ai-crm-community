@@ -60,6 +60,7 @@ class Public::Api::V1::Inboxes::MessagesController < Public::Api::V1::InboxesCon
       sender: @contact_inbox.contact,
       content: permitted_params[:content],
       inbox_id: @conversation.inbox_id,
+      account_id: @conversation.account_id,
       echo_id: permitted_params[:echo_id],
       message_type: :incoming
     }

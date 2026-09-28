@@ -38,6 +38,7 @@ class Public::Api::V1::Inboxes::OutboundMessagesController < Public::Api::V1::In
       sender: nil,
       content: outbound_content,
       inbox_id: @conversation.inbox_id,
+      account_id: @conversation.account_id,
       echo_id: permitted_params[:echo_id],
       message_type: :outgoing,
       additional_attributes: outbound_additional_attributes

@@ -19,7 +19,8 @@ class Telegram::IncomingMessageService
       message_type: :incoming,
       sender: @contact,
       content_attributes: telegram_params_content_attributes,
-      source_id: telegram_params_message_id.to_s
+      source_id: telegram_params_message_id.to_s,
+      account_id: @inbox.account_id
     )
 
     process_message_attachments if message_params?
@@ -57,7 +58,8 @@ class Telegram::IncomingMessageService
       inbox_id: @inbox.id,
       contact_id: @contact.id,
       contact_inbox_id: @contact_inbox.id,
-      additional_attributes: conversation_additional_attributes
+      additional_attributes: conversation_additional_attributes,
+      account_id: @inbox.account_id
     }
   end
 

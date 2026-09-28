@@ -13,7 +13,8 @@ class Twilio::IncomingMessageService
       inbox_id: @inbox.id,
       message_type: :incoming,
       sender: @contact,
-      source_id: params[:SmsSid]
+      source_id: params[:SmsSid],
+      account_id: @inbox.account_id
     )
     attach_files
     @message.save!
@@ -62,7 +63,8 @@ class Twilio::IncomingMessageService
       inbox_id: @inbox.id,
       contact_id: @contact.id,
       contact_inbox_id: @contact_inbox.id,
-      additional_attributes: additional_attributes
+      additional_attributes: additional_attributes,
+      account_id: @inbox.account_id
     }
   end
 

@@ -5,7 +5,7 @@ require 'rails_helper'
 RSpec.describe Whatsapp::IncomingMessageEvolutionService do
   let(:provider_service) { instance_double(Whatsapp::Providers::EvolutionService) }
   let(:channel) { instance_double(Channel::Whatsapp, provider: 'evolution', provider_service: provider_service) }
-  let(:inbox) { instance_double(Inbox, id: 1, channel: channel) }
+  let(:inbox) { instance_double(Inbox, id: 1, channel: channel, account_id: 42) }
   let(:contact) do
     instance_double(Contact, id: 99, name: 'WhatsApp Group 99876', identifier: '12345-9876@g.us', update!: true, group?: true).tap do |c|
       allow(c).to receive(:name).and_return('WhatsApp Group 99876')

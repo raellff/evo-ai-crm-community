@@ -38,7 +38,8 @@ class Line::IncomingMessageService
       inbox_id: @inbox.id,
       message_type: :incoming,
       sender: @contact,
-      source_id: event['message']['id'].to_s
+      source_id: event['message']['id'].to_s,
+      account_id: @inbox.account_id
     )
     @message
   end
@@ -122,7 +123,8 @@ class Line::IncomingMessageService
     {
       inbox_id: @inbox.id,
       contact_id: @contact.id,
-      contact_inbox_id: @contact_inbox.id
+      contact_inbox_id: @contact_inbox.id,
+      account_id: @inbox.account_id
     }
   end
 

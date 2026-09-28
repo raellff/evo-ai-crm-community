@@ -43,6 +43,10 @@ class ConversationBuilder
       inbox_id: @contact_inbox.inbox_id,
       contact_id: @contact_inbox.contact_id,
       contact_inbox_id: @contact_inbox.id,
+      # Used by the public (unauthenticated) API/widget conversation-creation
+      # path too, where Current.account is never set — stamp explicitly so
+      # AccountScoped's before_validation fallback isn't relied on.
+      account_id: @contact_inbox.inbox.account_id,
       additional_attributes: additional_attributes,
       custom_attributes: custom_attributes,
       snoozed_until: params[:snoozed_until],

@@ -61,6 +61,7 @@ class SupportMailbox < ApplicationMailbox
                                                                                  inbox_id: @inbox.id,
                                                                                  contact_id: @contact.id,
                                                                                  contact_inbox_id: @contact_inbox.id,
+                                                                                 account_id: @inbox.account_id,
                                                                                  additional_attributes: {
                                                                                    in_reply_to: in_reply_to,
                                                                                    source: 'email',
