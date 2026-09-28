@@ -109,7 +109,14 @@ class ContactInboxWithContactBuilder
       custom_attributes: contact_attributes[:custom_attributes],
       location: contact_attributes[:location] || '', # Ensure location is never nil
       country_code: contact_attributes[:country_code] || '', # Ensure country_code is never nil
-      type: contact_attributes[:type] || 'person'
+      type: contact_attributes[:type] || 'person',
+      # AccountScoped's before_validation only stamps account_id from
+      # Current.account, which is nil here (this builder runs from inbound
+      # webhook jobs, with no request/session). Without this, the contact
+      # was created with account_id nil — invisible under any tenant-scoped
+      # query, even though the webhook itself succeeded (EVO: WhatsApp
+      # messages "arrive" as a notification but never show in Conversations).
+      account_id: inbox.account_id
     )
 
     # Contacts created via inbox/channel flows are usually followed by conversation creation.

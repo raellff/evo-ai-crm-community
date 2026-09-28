@@ -7,7 +7,13 @@ module Whatsapp::IncomingMessageServiceHelpers
     {
       inbox_id: @inbox.id,
       contact_id: @contact.id,
-      contact_inbox_id: @contact_inbox.id
+      contact_inbox_id: @contact_inbox.id,
+      # AccountScoped's before_validation only stamps account_id from
+      # Current.account, which is nil in this webhook-job context (no
+      # request/session) — without this, the conversation was created with
+      # account_id nil, invisible under any tenant-scoped Conversations
+      # query even though the webhook itself succeeded.
+      account_id: @inbox.account_id
     }
   end
 
