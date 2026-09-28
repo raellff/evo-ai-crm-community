@@ -43,8 +43,15 @@ module ContactPiiMasker
   # concern itself reads from at evo_auth_concern.rb:62) closes the whole
   # class of "no one set Current.account on this thread" leaks at the
   # predicate level instead of patching each new caller.
+  #
+  # `Current.pii_mask_runtime_account` is ApplicationJob's per-job memoized
+  # copy of that same Hash (see its comment) — checked first purely to avoid
+  # re-querying `runtime_configs` inside a job's fan-out; falling through to
+  # `RuntimeConfig.account` below still gives the identical answer outside a
+  # job, or if a job never set it.
   def resolved_account
     return Current.account if Current.account.is_a?(Hash)
+    return Current.pii_mask_runtime_account if Current.pii_mask_runtime_account.is_a?(Hash)
 
     RuntimeConfig.account
   end

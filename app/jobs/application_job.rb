@@ -6,22 +6,29 @@ class ApplicationJob < ActiveJob::Base
     } because of ActiveJob::DeserializationError (#{error.message})")
   end
 
-  # EVO-1551 round 4 — root-cause fix.
+  # EVO-1551 round 4 — root-cause fix, now bug-for-bug corrected.
   # `Current.account` is populated by `EvoAuthConcern` only on the HTTP
   # pipeline. Sidekiq threads inherit nothing, so any job that ends up
   # calling `ContactPiiMasker.account_flag_enabled?` (directly or via a
   # model's `push_event_data`) used to fail-open and ship raw PII.
-  # `ContactPiiMasker` keeps a `RuntimeConfig.account` fallback as
-  # defence-in-depth, but doing it here once per job avoids re-querying
-  # `runtime_configs` on every broadcast inside a fan-out (e.g.
-  # `ActionCableBroadcastJob#broadcast_to_members` looping over inbox
-  # members) and gives any future code path that reads `Current.account`
-  # the correct value for free.
+  #
+  # The original fix stashed `RuntimeConfig.account` (a plain Hash) in
+  # `Current.account` itself — but `AccountScoped#default_scope` (added
+  # later, for multi-account-tenancy) calls `.id` on whatever
+  # `Current.account` holds, so every job touching an AccountScoped model
+  # (Inbox, Conversation, User, ...) started raising
+  # `NoMethodError: undefined method 'id' for an instance of Hash` and dying
+  # mid-`perform` — e.g. `DeleteObjectJob` destroying a channel/inbox,
+  # leaving its phone_number/website_token behind and blocking reconnection.
+  #
+  # Fix: keep stashing the same Hash, once per job, for the exact same PII
+  # reason — just in a slot `AccountScoped` never reads, so it can't corrupt
+  # its "fails open when unset" contract for `Current.account` itself.
   around_perform do |_job, block|
-    needed_account = Current.account.nil?
-    Current.account = RuntimeConfig.account if needed_account
+    needed_account = Current.pii_mask_runtime_account.nil?
+    Current.pii_mask_runtime_account = RuntimeConfig.account if needed_account
     block.call
   ensure
-    Current.account = nil if needed_account
+    Current.pii_mask_runtime_account = nil if needed_account
   end
 end

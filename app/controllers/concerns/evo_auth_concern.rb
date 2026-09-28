@@ -61,7 +61,20 @@ module EvoAuthConcern
 
     Current.account = resolve_account(user_data['accounts'])
     user.update!(account_id: Current.account.id) if Current.account && user.account_id != Current.account.id
-    Current.account ||= RuntimeConfig.account
+
+    # NOTE: no `Current.account ||= RuntimeConfig.account` fallback here on
+    # purpose. `RuntimeConfig.account` is the pre-multi-tenancy single-account
+    # JSON blob (a Hash), not an Account record — every consumer of
+    # `Current.account` (AccountScoped#default_scope, FeatureGateConcern,
+    # Pundit's `pundit_user`) calls AR methods like `.id`/`.feature_enabled?`
+    # on it, so assigning that Hash here crashed the request with
+    # NoMethodError whenever `resolve_account` returned nil (token without
+    # account data). `Current.account` staying nil is the contract
+    # AccountScoped already documents ("fails open" for unscoped access) —
+    # see the matching fix in ApplicationJob for the background-job side of
+    # this same bug. `ContactPiiMasker` does not need this: it already falls
+    # back to `RuntimeConfig.account` directly when `Current.account` isn't a
+    # Hash.
 
     # Resolve the granular `conversations.read_all` permission once per request and
     # cache it in Current. Admin short-circuits BEFORE any remote call. Non-admins

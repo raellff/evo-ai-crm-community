@@ -11,6 +11,12 @@ module Current
   thread_mattr_accessor :evo_permission_cache
   thread_mattr_accessor :evo_role_key
   thread_mattr_accessor :evo_can_read_all_inboxes
+  # Per-job PII-masking snapshot (see ApplicationJob). Kept separate from
+  # `Current.account`: that one must stay an Account record or nil for
+  # AccountScoped/FeatureGateConcern/Pundit, which call AR methods on it;
+  # this one is deliberately the raw RuntimeConfig.account Hash that
+  # ContactPiiMasker reads.
+  thread_mattr_accessor :pii_mask_runtime_account
 
   def self.reset
     Current.user = nil
@@ -25,5 +31,6 @@ module Current
     Current.evo_permission_cache = nil
     Current.evo_role_key = nil
     Current.evo_can_read_all_inboxes = nil
+    Current.pii_mask_runtime_account = nil
   end
 end
