@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'webmock/rspec'
 
 # Pins that QrcodesController#set_instance_params resolves credentials through
 # EvolutionGoConcern#evolution_go_credentials_for, so a refactor that drops the
@@ -90,6 +91,43 @@ RSpec.describe Api::V1::EvolutionGo::QrcodesController, type: :controller do
       )
 
       controller_instance.create
+    end
+  end
+
+  # Regression: Evolution Go's GET /instance/qr answers with LOWERCASE keys
+  # ({"data":{"qrcode":"...","code":"..."}}), but get_qrcode_go used to read
+  # 'Qrcode'/'Code' (capitalized) — a Hash lookup that never matches, so
+  # base64/code came back nil on every real call. That still rendered HTTP
+  # 200 (no exception raised), so the frontend silently showed its generic
+  # QR-code error the instant the user clicked "Conectar dispositivo", even
+  # though the provider call itself succeeded.
+  describe '#get_qrcode_go' do
+    let(:controller_instance) { described_class.new }
+
+    it 'reads base64/code from the actual lowercase keys Evolution Go returns' do
+      stub_request(:get, 'http://go.example.com/instance/qr')
+        .to_return(
+          status: 200,
+          body: { data: { qrcode: 'data:image/png;base64,AAA', code: 'https://wa.me/…' },
+                   message: 'success' }.to_json
+        )
+
+      result = controller_instance.send(:get_qrcode_go, 'http://go.example.com', 'inst-tok')
+
+      expect(result).to eq(base64: 'data:image/png;base64,AAA', code: 'https://wa.me/…', connected: false)
+    end
+
+    it 'still works if a future response uses capitalized keys' do
+      stub_request(:get, 'http://go.example.com/instance/qr')
+        .to_return(
+          status: 200,
+          body: { data: { Qrcode: 'data:image/png;base64,BBB', Code: 'https://wa.me/…' },
+                   message: 'success' }.to_json
+        )
+
+      result = controller_instance.send(:get_qrcode_go, 'http://go.example.com', 'inst-tok')
+
+      expect(result).to eq(base64: 'data:image/png;base64,BBB', code: 'https://wa.me/…', connected: false)
     end
   end
 end

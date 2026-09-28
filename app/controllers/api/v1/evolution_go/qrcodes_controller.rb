@@ -144,29 +144,30 @@ class Api::V1::EvolutionGo::QrcodesController < Api::V1::BaseController
 
     parsed_response = JSON.parse(response.body)
 
-    # Evolution Go API retorna:
+    # Evolution Go API actually returns lowercase keys:
     # {
     #   "data": {
-    #     "Qrcode": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
-    #     "Code": "2@C7BUZArTUkKYRlxxRvQxa3+qoKLOywu5QcewxlFtU1bbG2..."
+    #     "qrcode": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
+    #     "code": "2@C7BUZArTUkKYRlxxRvQxa3+qoKLOywu5QcewxlFtU1bbG2..."
     #   },
     #   "message": "success"
     # }
-
-    if parsed_response['data']
-      {
-        base64: parsed_response['data']['Qrcode'],
-        code: parsed_response['data']['Code'],
-        connected: false
-      }
-    else
-      # Fallback se estrutura for diferente
-      {
-        base64: parsed_response['Qrcode'],
-        code: parsed_response['Code'],
-        connected: false
-      }
-    end
+    #
+    # The previous version of this method read 'Qrcode'/'Code' (capitalized),
+    # which never matched — Hash lookup is case-sensitive — so `base64` and
+    # `code` came back nil on EVERY call, with an HTTP 200 (no exception, so
+    # the controller's rescue never fired). The frontend then silently
+    # treated the null base64 as a failure and showed the generic
+    # "Erro ao gerar QR Code" toast right when the user clicked "Conectar
+    # dispositivo", even though the Evolution Go call itself succeeded.
+    # Both casings are checked here in case a different Evolution Go version
+    # answers with the capitalized keys the code originally expected.
+    container = parsed_response['data'] || parsed_response
+    {
+      base64: container['qrcode'] || container['Qrcode'],
+      code: container['code'] || container['Code'],
+      connected: false
+    }
 
   rescue JSON::ParserError => e
     Rails.logger.error "Evolution Go API: QR code JSON parse error: #{e.message}, Body: #{response&.body}"
