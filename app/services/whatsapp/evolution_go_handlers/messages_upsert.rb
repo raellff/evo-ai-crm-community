@@ -263,7 +263,16 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
       sender: incoming? ? @contact : (User.where(type: 'SuperAdmin').first || User.first),
       sender_type: incoming? ? 'Contact' : 'User',
       message_type: incoming? ? :incoming : :outgoing,
-      content_attributes: content_attrs
+      content_attributes: content_attrs,
+      # AccountScoped's before_validation only stamps account_id from
+      # Current.account, nil in this webhook-job context (no request/
+      # session) — without this the message was created untenanted. This
+      # is Evolution Go's OWN message-building code (separate from the
+      # shared Whatsapp::IncomingMessageServiceHelpers#create_message fixed
+      # earlier), missed because create_message/build_message_attributes
+      # here override the base class's version rather than falling through
+      # to it.
+      account_id: @inbox.account_id
     }
 
     @message = conversation.messages.build(message_attributes)
